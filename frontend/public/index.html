@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CarShop Iluminación & Detailing</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- HEADER Y BANNER PRINCIPAL -->
+  <header class="hero-header">
+    <div class="hero-content">
+      <h1>CarShop Iluminación</h1>
+      <p class="subtitle">Detailing, Iluminación LED & Accesorios Automotrices</p>
+    </div>
+  </header>
+
+  <main class="container-client">
+    <!-- SECCIÓN DE CATÁLOGO DE PRODUCTOS -->
+    <section class="client-section">
+      <h2 class="section-title">Nuestros Productos y Servicios</h2>
+      <div id="catalogo-grid" class="catalogo-grid">
+        <p class="loading-text">Cargando catálogo en tiempo real...</p>
+      </div>
+    </section>
+
+    <!-- SECCIÓN DE COTIZADOR DE PRESUPUESTO POR WHATSAPP -->
+    <section class="client-section cotizador-section">
+      <h2 class="section-title">Solicitar Presupuesto Personalizado</h2>
+      <form id="form-cotizador" class="card-form cotizador-form">
+        <div class="form-group">
+          <label for="cotiz-marca">Marca del Vehículo</label>
+          <input type="text" id="cotiz-marca" required placeholder="Ej: Volkswagen">
+        </div>
+        <div class="form-group">
+          <label for="cotiz-modelo">Modelo y Año</label>
+          <input type="text" id="cotiz-modelo" required placeholder="Ej: Gol Trend 2015">
+        </div>
+        <div class="form-group">
+          <label for="cotiz-servicio">Servicio o Producto Deseado</label>
+          <select id="cotiz-servicio" required>
+            <option value="">Seleccionar...</option>
+            <option value="Instalación Kit LED">Instalación Kit LED</option>
+            <option value="Pulido de Ópticas">Pulido de Ópticas</option>
+            <option value="Detailing Completo">Detailing Completo</option>
+            <option value="Tratamiento Cerámico">Tratamiento Cerámico</option>
+            <option value="Consulta General / Reparación">Consulta General / Reparación</option>
+          </select>
+        </div>
+        <div class="form-group full-width">
+          <label for="cotiz-notas">Detalles o Especificaciones Adicionales</label>
+          <textarea id="cotiz-notas" rows="3" placeholder="Ej: Luces LED para bajas y antinieblas, consulta por turno..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary full-width btn-whatsapp">
+          📲 Enviar Presupuesto por WhatsApp
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <script type="module" src="../js/app.js"></script>
+</body>
+</html>

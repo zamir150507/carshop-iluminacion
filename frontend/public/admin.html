@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Admin - CarShop Iluminación</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- PANTALLA DE LOGIN -->
+  <div id="login-container" class="container-center">
+    <form id="form-login" class="card-form">
+      <h2>Acceso Administrador</h2>
+      <div class="form-group">
+        <label for="login-email">Correo Electrónico</label>
+        <input type="email" id="login-email" required placeholder="admin@carshopiluminacion.com">
+      </div>
+      <div class="form-group">
+        <label for="login-password">Contraseña</label>
+        <input type="password" id="login-password" required placeholder="••••••••">
+      </div>
+      <button type="submit" class="btn btn-primary">Ingresar</button>
+    </form>
+  </div>
+
+  <!-- PANTALLA PRINCIPAL ADMIN -->
+  <div id="admin-container" class="container-admin" style="display: none;">
+    <header class="admin-header">
+      <h1>Panel de Control - CarShop Iluminación</h1>
+      <button id="btn-logout" class="btn btn-secondary">Cerrar Sesión</button>
+    </header>
+
+    <!-- ALERTAS DE STOCK MÍNIMO -->
+    <div id="alertas-container"></div>
+
+    <div class="admin-grid">
+      <!-- FORMULARIO DE CARGA DE ITEM -->
+      <section class="panel-section">
+        <h2>Cargar Nuevo Item</h2>
+        <form id="form-nuevo-item" class="card-form">
+          <div class="form-group">
+            <label for="item-nombre">Nombre / Descripción</label>
+            <input type="text" id="item-nombre" required placeholder="Ej: Kit LED H7 20000LM">
+          </div>
+          <div class="form-group">
+            <label for="item-tipo">Tipo</label>
+            <select id="item-tipo" required>
+              <option value="producto">Producto</option>
+              <option value="servicio">Servicio / Instalación</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="item-categoria">Categoría</label>
+            <input type="text" id="item-categoria" required placeholder="Ej: Iluminación Exterior">
+          </div>
+          <div class="form-group">
+            <label for="item-precio-compra">Precio Compra ($)</label>
+            <input type="number" id="item-precio-compra" required min="0" step="100" placeholder="15000">
+          </div>
+          <div class="form-group">
+            <label for="item-precio-venta">Precio Venta ($)</label>
+            <input type="number" id="item-precio-venta" required min="0" step="100" placeholder="35000">
+          </div>
+          <div class="form-group">
+            <label for="item-stock">Stock Inicial</label>
+            <input type="number" id="item-stock" required min="0" placeholder="10">
+          </div>
+          <div class="form-group">
+            <label for="item-stock-minimo">Stock Mínimo (Alerta)</label>
+            <input type="number" id="item-stock-minimo" required min="0" placeholder="3">
+          </div>
+          <div class="form-group full-width">
+            <label for="item-imagen-url">URL de la Foto (Link directo)</label>
+            <input type="url" id="item-imagen-url" placeholder="https://i.postimg.cc/xxx/led.jpg">
+          </div>
+          <button type="submit" class="btn btn-primary full-width">Guardar en Inventario</button>
+        </form>
+      </section>
+
+      <!-- REGISTRO DE VENTAS EN CAJA -->
+      <section class="panel-section">
+        <h2>Registrar Venta / Cobro</h2>
+        <form id="form-venta" class="card-form">
+          <div class="form-group">
+            <label for="venta-item">Seleccionar Producto/Servicio</label>
+            <select id="venta-item" required>
+              <option value="">Cargando lista...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="venta-cantidad">Cantidad</label>
+            <input type="number" id="venta-cantidad" required min="1" value="1">
+          </div>
+          <div class="form-group">
+            <label for="venta-metodo">Método de Pago</label>
+            <select id="venta-metodo" required>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="tarjeta">Tarjeta Débito/Crédito</option>
+            </select>
+          </div>
+          <div class="form-group checkbox-group">
+            <input type="checkbox" id="venta-arca">
+            <label for="venta-arca">Emitir Factura Electrónica ARCA</label>
+          </div>
+          <button type="submit" class="btn btn-success full-width">Registrar Venta</button>
+        </form>
+      </section>
+    </div>
+
+    <!-- LISTADO DE INVENTARIO CON ACCIONES -->
+    <section class="panel-section table-section">
+      <h2>Inventario Actual</h2>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Imagen</th>
+              <th>Nombre</th>
+              <th>Tipo</th>
+              <th>Categoría</th>
+              <th>P. Compra</th>
+              <th>P. Venta</th>
+              <th>Stock</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-inventario-body">
+            <!-- Se completa dinámicamente -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- MODAL DE EDICIÓN DE ITEM -->
+  <div id="modal-editar" class="modal" style="display: none;">
+    <div class="modal-content">
+      <span id="btn-cerrar-modal" class="modal-close">&times;</span>
+      <h2>Editar Producto / Servicio</h2>
+      <form id="form-editar-item" class="card-form">
+        <input type="hidden" id="edit-id">
+        <div class="form-group">
+          <label for="edit-nombre">Nombre / Descripción</label>
+          <input type="text" id="edit-nombre" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-tipo">Tipo</label>
+          <select id="edit-tipo" required>
+            <option value="producto">Producto</option>
+            <option value="servicio">Servicio / Instalación</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-categoria">Categoría</label>
+          <input type="text" id="edit-categoria" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-precio-compra">Precio Compra ($)</label>
+          <input type="number" id="edit-precio-compra" required min="0" step="100">
+        </div>
+        <div class="form-group">
+          <label for="edit-precio-venta">Precio Venta ($)</label>
+          <input type="number" id="edit-precio-venta" required min="0" step="100">
+        </div>
+        <div class="form-group">
+          <label for="edit-stock">Stock</label>
+          <input type="number" id="edit-stock" required min="0">
+        </div>
+        <div class="form-group">
+          <label for="edit-stock-minimo">Stock Mínimo</label>
+          <input type="number" id="edit-stock-minimo" required min="0">
+        </div>
+        <div class="form-group full-width">
+          <label for="edit-imagen-url">URL de la Foto</label>
+          <input type="url" id="edit-imagen-url">
+        </div>
+        <button type="submit" class="btn btn-primary full-width">Guardar Cambios</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="../js/admin.js"></script>
+</body>
+</html>
