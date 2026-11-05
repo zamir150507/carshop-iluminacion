@@ -27,30 +27,17 @@ if (headerWhatsappLink) {
   headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
 }
 
-// 1. ESCUCHAR AMBAS COLECCIONES (inventario y productos) EN TIEMPO REAL
-let itemsInventario = [];
-let itemsProductos = [];
-
-function actualizarVistaCombinada() {
-  // Une ambas listas sin duplicar IDs
-  const mapa = new Map();
-  [...itemsInventario, ...itemsProductos].forEach(item => mapa.set(item.id, item));
-  productosColeccion = Array.from(mapa.values());
-  
-  console.log("Ítems totales encontrados en Firebase:", productosColeccion.length);
+// 1. CARGAR DESDE LA COLECCIÓN REAL: 'productos_servicios'
+onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
+  productosColeccion = [];
+  snapshot.forEach(doc => {
+    productosColeccion.push({ id: doc.id, ...doc.data() });
+  });
   renderizarCatalogo(productosColeccion);
   actualizarUIBagde();
-}
-
-onSnapshot(collection(db, "inventario"), (snapshot) => {
-  itemsInventario = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  actualizarVistaCombinada();
-}, (err) => console.log("Nota en inventario:", err));
-
-onSnapshot(collection(db, "productos"), (snapshot) => {
-  itemsProductos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  actualizarVistaCombinada();
-}, (err) => console.log("Nota en productos:", err));
+}, (err) => {
+  console.error("Error al leer productos_servicios:", err);
+});
 
 // 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
 function renderizarCatalogo(lista) {
@@ -63,10 +50,9 @@ function renderizarCatalogo(lista) {
 
   catalogoGrid.innerHTML = '';
   lista.forEach(p => {
-    // Detecta precioVenta (del Admin) o precio estándar
     const precioNum = Number(p.precioVenta || p.precio || 0);
-    const imagenUrl = (p.imagen || p.foto || p.urlFoto || "").trim() !== "" 
-      ? (p.imagen || p.foto || p.urlFoto)
+    const imagenUrl = (p.urlFoto || p.imagen || p.foto || "").trim() !== "" 
+      ? (p.urlFoto || p.imagen || p.foto)
       : "https://via.placeholder.com/300x200?text=CarShop+Iluminacion";
 
     const card = document.createElement('div');
