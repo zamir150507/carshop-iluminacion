@@ -15,7 +15,7 @@ import {
   deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-const BACKEND_URL = "http://localhost:3000";
+const BACKEND_URL = "https://carshop-backend-2t7v.onrender.com";
 
 // Elementos del DOM
 const loginContainer = document.getElementById('login-container');
