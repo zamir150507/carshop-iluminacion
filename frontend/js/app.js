@@ -6,7 +6,7 @@ import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.
 // ==========================================
 const TELEFONO_WHATSAPP = "5492974114542";
 
-// Estado de productos y carrito
+// Estado global de productos y carrito
 let productosColeccion = [];
 let carrito = JSON.parse(localStorage.getItem('carshop_carrito')) || [];
 
@@ -23,11 +23,13 @@ const btnCheckoutWhatsapp = document.getElementById('btn-checkout-whatsapp');
 const headerWhatsappLink = document.getElementById('header-whatsapp-link');
 const formCotizador = document.getElementById('form-cotizador');
 
+// Configurar enlace de WhatsApp en el Header
 if (headerWhatsappLink) {
   headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
+  headerWhatsappLink.textContent = `+${TELEFONO_WHATSAPP}`;
 }
 
-// 1. CARGAR DESDE LA COLECCIÓN REAL: 'productos_servicios'
+// 1. CARGAR PRODUCTOS DESDE FIRESTORE ('productos_servicios') EN TIEMPO REAL
 onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
   productosColeccion = [];
   snapshot.forEach(doc => {
@@ -36,7 +38,10 @@ onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
   renderizarCatalogo(productosColeccion);
   actualizarUIBagde();
 }, (err) => {
-  console.error("Error al leer productos_servicios:", err);
+  console.error("Error al leer la colección productos_servicios:", err);
+  if (catalogoGrid) {
+    catalogoGrid.innerHTML = `<p class="loading-text">Error al cargar productos.</p>`;
+  }
 });
 
 // 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
@@ -49,26 +54,34 @@ function renderizarCatalogo(lista) {
   }
 
   catalogoGrid.innerHTML = '';
+  const fallbackImg = "https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=400&q=80";
+
   lista.forEach(p => {
     const precioNum = Number(p.precioVenta || p.precio || 0);
-    const imagenUrl = (p.urlFoto || p.imagen || p.foto || "").trim() !== "" 
-      ? (p.urlFoto || p.imagen || p.foto)
-      : "https://via.placeholder.com/300x200?text=CarShop+Iluminacion";
+    const fotoDirecta = (p.urlFoto || p.imagen || p.foto || "").trim();
+    const srcImagen = fotoDirecta !== "" ? fotoDirecta : fallbackImg;
 
     const card = document.createElement('div');
     card.className = 'card-producto';
     card.innerHTML = `
-      <img src="${imagenUrl}" alt="${p.nombre}" class="producto-img" onerror="this.src='https://via.placeholder.com/300x200?text=Sin+Imagen'">
+      <img src="${srcImagen}" alt="${p.nombre}" class="producto-img">
       <div class="card-body">
         <h3>${p.nombre}</h3>
         <p class="precio">$${precioNum.toLocaleString('es-AR')}</p>
         <p class="stock">Stock disponible: ${p.stock ?? 1}</p>
-        <button class="btn btn-primary full-width btn-agregar" data-id="${p.id}">
+        <button class="btn btn-primary full-width btn-agregar">
           🛒 Agregar al Carrito
         </button>
       </div>
     `;
 
+    // Manejo seguro de imagen rota o bloqueada
+    const imgEl = card.querySelector('.producto-img');
+    imgEl.addEventListener('error', () => {
+      imgEl.src = fallbackImg;
+    });
+
+    // Evento para agregar producto al carrito
     card.querySelector('.btn-agregar').addEventListener('click', () => {
       agregarAlCarrito({ ...p, precio: precioNum });
     });
@@ -82,14 +95,14 @@ if (inputBuscador) {
   inputBuscador.addEventListener('input', (e) => {
     const busqueda = e.target.value.toLowerCase().trim();
     const filtrados = productosColeccion.filter(p => 
-      p.nombre.toLowerCase().includes(busqueda) || 
+      (p.nombre && p.nombre.toLowerCase().includes(busqueda)) || 
       (p.categoria && p.categoria.toLowerCase().includes(busqueda))
     );
     renderizarCatalogo(filtrados);
   });
 }
 
-// 4. CARRITO DE COMPRAS
+// 4. LÓGICA DEL CARRITO DE COMPRAS
 function agregarAlCarrito(producto) {
   const existe = carrito.find(item => item.id === producto.id);
   const stockDisponible = producto.stock ?? 99;
@@ -149,7 +162,7 @@ function renderizarCarritoModal() {
 
   if (carrito.length === 0) {
     carritoItemsDiv.innerHTML = `<p style="color:#aaa; text-align:center; padding: 20px;">El carrito está vacío.</p>`;
-    carritoTotalEl.textContent = "$0";
+    if (carritoTotalEl) carritoTotalEl.textContent = "$0";
     return;
   }
 
@@ -182,26 +195,28 @@ function renderizarCarritoModal() {
     carritoItemsDiv.appendChild(row);
   });
 
-  carritoTotalEl.textContent = `$${total.toLocaleString('es-AR')}`;
+  if (carritoTotalEl) {
+    carritoTotalEl.textContent = `$${total.toLocaleString('es-AR')}`;
+  }
 }
 
 function abrirModalCarrito() {
   renderizarCarritoModal();
-  modalCarrito.classList.remove('hidden');
+  if (modalCarrito) modalCarrito.classList.remove('hidden');
 }
 
 function cerrarModalCarrito() {
-  modalCarrito.classList.add('hidden');
+  if (modalCarrito) modalCarrito.classList.add('hidden');
 }
 
 if (btnAbrirCarrito) btnAbrirCarrito.addEventListener('click', abrirModalCarrito);
 if (btnCerrarCarrito) btnCerrarCarrito.addEventListener('click', cerrarModalCarrito);
 
-// 5. ENVIAR PEDIDO A WHATSAPP
+// 5. ENVIAR PEDIDO DEL CARRITO A WHATSAPP
 if (btnCheckoutWhatsapp) {
   btnCheckoutWhatsapp.addEventListener('click', () => {
     if (carrito.length === 0) {
-      alert("Agregá al menos un producto al carrito.");
+      alert("Agregá al menos un producto al carrito para continuar.");
       return;
     }
 
@@ -215,14 +230,14 @@ if (btnCheckoutWhatsapp) {
     });
 
     mensaje += `\n💰 *Total Estimado:* $${total.toLocaleString('es-AR')}\n\n`;
-    mensaje += "¿Tienen disponibilidad?";
+    mensaje += "¿Tienen disponibilidad y turno para coordinar?";
 
     const url = `https://wa.me/${TELEFONO_WHATSAPP}?text=${encodeURIComponent(mensaje)}`;
     window.open(url, '_blank');
   });
 }
 
-// 6. COTIZADOR POR WHATSAPP
+// 6. FORMULARIO DE PRESUPUESTO PERSONALIZADO POR WHATSAPP
 if (formCotizador) {
   formCotizador.addEventListener('submit', (e) => {
     e.preventDefault();
