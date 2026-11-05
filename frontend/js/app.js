@@ -4,7 +4,7 @@ import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.
 // ==========================================
 // CONFIGURACIÓN DE TU NÚMERO DE WHATSAPP
 // ==========================================
-const TELEFONO_WHATSAPP = "5492974114542"; // Reemplazá con tu número real sin espacios ni guiones
+const TELEFONO_WHATSAPP = "5492974114542"; // Número configurado en tu header
 
 // Estado de productos y carrito
 let productosColeccion = [];
@@ -26,17 +26,21 @@ const formCotizador = document.getElementById('form-cotizador');
 // Configurar enlace del Header
 if (headerWhatsappLink) {
   headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
-  headerWhatsappLink.textContent = `+${TELEFONO_WHATSAPP}`;
 }
 
-// 1. CARGAR PRODUCTOS DESDE FIRESTORE EN TIEMPO REAL
-onSnapshot(collection(db, "productos"), (snapshot) => {
+// 1. CARGAR DESDE FIRESTORE (Colección 'inventario')
+onSnapshot(collection(db, "inventario"), (snapshot) => {
   productosColeccion = [];
   snapshot.forEach(doc => {
     productosColeccion.push({ id: doc.id, ...doc.data() });
   });
   renderizarCatalogo(productosColeccion);
   actualizarUIBagde();
+}, (error) => {
+  console.error("Error al leer Firestore:", error);
+  if (catalogoGrid) {
+    catalogoGrid.innerHTML = `<p class="loading-text">Error al cargar inventario.</p>`;
+  }
 });
 
 // 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
@@ -50,8 +54,10 @@ function renderizarCatalogo(lista) {
 
   catalogoGrid.innerHTML = '';
   lista.forEach(p => {
-    const imagenUrl = (p.imagen && p.imagen.trim() !== "") 
-      ? p.imagen 
+    // Soportar variantes de nombres de campos del Admin
+    const precio = Number(p.precioVenta || p.precio || 0);
+    const imagenUrl = (p.imagen || p.foto || p.urlFoto || "").trim() !== "" 
+      ? (p.imagen || p.foto || p.urlFoto)
       : "https://via.placeholder.com/300x200?text=CarShop+Iluminacion";
 
     const card = document.createElement('div');
@@ -60,7 +66,7 @@ function renderizarCatalogo(lista) {
       <img src="${imagenUrl}" alt="${p.nombre}" class="producto-img" onerror="this.src='https://via.placeholder.com/300x200?text=Sin+Imagen'">
       <div class="card-body">
         <h3>${p.nombre}</h3>
-        <p class="precio">$${Number(p.precio).toLocaleString('es-AR')}</p>
+        <p class="precio">$${precio.toLocaleString('es-AR')}</p>
         <p class="stock">Stock disponible: ${p.stock}</p>
         <button class="btn btn-primary full-width btn-agregar" data-id="${p.id}">
           🛒 Agregar al Carrito
@@ -68,27 +74,27 @@ function renderizarCatalogo(lista) {
       </div>
     `;
 
-    // Evento de agregar al carrito
     card.querySelector('.btn-agregar').addEventListener('click', () => {
-      agregarAlCarrito(p);
+      agregarAlCarrito({ ...p, precio });
     });
 
     catalogoGrid.appendChild(card);
   });
 }
 
-// 3. LÓGICA DEL BUSCADOR EN TIEMPO REAL
+// 3. BUSCADOR EN TIEMPO REAL
 if (inputBuscador) {
   inputBuscador.addEventListener('input', (e) => {
     const busqueda = e.target.value.toLowerCase().trim();
     const filtrados = productosColeccion.filter(p => 
-      p.nombre.toLowerCase().includes(busqueda)
+      p.nombre.toLowerCase().includes(busqueda) || 
+      (p.categoria && p.categoria.toLowerCase().includes(busqueda))
     );
     renderizarCatalogo(filtrados);
   });
 }
 
-// 4. FUNCIONES DEL CARRITO DE COMPRAS
+// 4. CARRITO DE COMPRAS
 function agregarAlCarrito(producto) {
   const existe = carrito.find(item => item.id === producto.id);
   if (existe) {
@@ -182,7 +188,6 @@ function renderizarCarritoModal() {
   carritoTotalEl.textContent = `$${total.toLocaleString('es-AR')}`;
 }
 
-// 5. ABRIR / CERRAR MODAL DEL CARRITO
 function abrirModalCarrito() {
   renderizarCarritoModal();
   modalCarrito.classList.remove('hidden');
@@ -195,7 +200,7 @@ function cerrarModalCarrito() {
 if (btnAbrirCarrito) btnAbrirCarrito.addEventListener('click', abrirModalCarrito);
 if (btnCerrarCarrito) btnCerrarCarrito.addEventListener('click', cerrarModalCarrito);
 
-// 6. ENVIAR PEDIDO DEL CARRITO A WHATSAPP
+// 5. ENVIAR PEDIDO POR WHATSAPP
 if (btnCheckoutWhatsapp) {
   btnCheckoutWhatsapp.addEventListener('click', () => {
     if (carrito.length === 0) {
@@ -213,14 +218,14 @@ if (btnCheckoutWhatsapp) {
     });
 
     mensaje += `\n💰 *Total Estimado:* $${total.toLocaleString('es-AR')}\n\n`;
-    mensaje += "¿Tienen disponibilidad y turno disponible para coordinar?";
+    mensaje += "¿Tienen disponibilidad?";
 
-    const url = `https://wa.me/${5492974114542}?text=${encodeURIComponent(mensaje)}`;
+    const url = `https://wa.me/${TELEFONO_WHATSAPP}?text=${encodeURIComponent(mensaje)}`;
     window.open(url, '_blank');
   });
 }
 
-// 7. COTIZADOR INDIVIDUAL (Formulario inferior)
+// 6. COTIZADOR
 if (formCotizador) {
   formCotizador.addEventListener('submit', (e) => {
     e.preventDefault();
