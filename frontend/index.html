@@ -8,16 +8,32 @@
 </head>
 <body>
 
-  <!-- HEADER Y BANNER PRINCIPAL -->
+  <!-- HEADER Y CONTACTO -->
   <header class="hero-header">
     <div class="hero-content">
       <h1>CarShop Iluminación</h1>
       <p class="subtitle">Detailing, Iluminación LED & Accesorios Automotrices</p>
+      
+      <div class="contact-bar">
+        <span>📲 Consultas directas: </span>
+        <a id="header-whatsapp-link" href="#" target="_blank" class="contact-phone">+54 9 297 000-0000</a>
+      </div>
     </div>
+
+    <!-- BOTÓN DE CARRITO -->
+    <button id="btn-abrir-carrito" class="btn-carrito-badge">
+      🛒 Carrito <span id="cart-count" class="cart-count">0</span>
+    </button>
   </header>
 
   <main class="container-client">
-    <!-- SECCIÓN DE CATÁLOGO DE PRODUCTOS -->
+    
+    <!-- BUSCADOR EN TIEMPO REAL -->
+    <section class="search-section">
+      <input type="text" id="input-buscador" placeholder="🔍 Buscar productos o servicios (ej: Kit LED, Pulido)...">
+    </section>
+
+    <!-- CATÁLOGO -->
     <section class="client-section">
       <h2 class="section-title">Nuestros Productos y Servicios</h2>
       <div id="catalogo-grid" class="catalogo-grid">
@@ -25,7 +41,7 @@
       </div>
     </section>
 
-    <!-- SECCIÓN DE COTIZADOR DE PRESUPUESTO POR WHATSAPP -->
+    <!-- COTIZADOR DE PRESUPUESTO PERSONALIZADO -->
     <section class="client-section cotizador-section">
       <h2 class="section-title">Solicitar Presupuesto Personalizado</h2>
       <form id="form-cotizador" class="card-form cotizador-form">
@@ -50,7 +66,7 @@
         </div>
         <div class="form-group full-width">
           <label for="cotiz-notas">Detalles o Especificaciones Adicionales</label>
-          <textarea id="cotiz-notas" rows="3" placeholder="Ej: Luces LED para bajas y antinieblas, consulta por turno..."></textarea>
+          <textarea id="cotiz-notas" rows="3" placeholder="Ej: Luces LED para bajas y antinieblas..."></textarea>
         </div>
         <button type="submit" class="btn btn-primary full-width btn-whatsapp">
           📲 Enviar Presupuesto por WhatsApp
@@ -58,6 +74,34 @@
       </form>
     </section>
   </main>
+
+  <!-- MODAL / DESPLEGABLE DEL CARRITO DE COMPRAS -->
+  <div id="modal-carrito" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🛒 Tu Carrito de Compras</h3>
+        <button id="btn-cerrar-carrito" class="btn-cerrar">&times;</button>
+      </div>
+
+      <div id="carrito-items" class="carrito-items">
+        <!-- Se genera dinámicamente con JS -->
+      </div>
+
+      <div class="modal-footer">
+        <div class="total-row">
+          <span>Total estimado:</span>
+          <strong id="carrito-total">$0</strong>
+        </div>
+        <button id="btn-checkout-whatsapp" class="btn btn-primary btn-whatsapp full-width">
+          📲 Comprar / Enviar Pedido por WhatsApp
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer style="text-align: center; padding: 20px; margin-top: 40px;">
+    <a href="admin.html" style="color: #666; text-decoration: none; font-size: 0.85rem;">Acceso Administrador</a>
+  </footer>
 
   <script type="module" src="js/app.js"></script>
 </body>

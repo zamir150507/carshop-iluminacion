@@ -1,79 +1,240 @@
 import { db } from './firebase.js';
-import { 
-  collection, 
-  onSnapshot,
-  query,
-  where 
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-const gridContainer = document.getElementById('catalogo-grid');
+// ==========================================
+// CONFIGURACIÓN DE TU NÚMERO DE WHATSAPP
+// ==========================================
+const TELEFONO_WHATSAPP = "5492974114542"; // Reemplazá con tu número real sin espacios ni guiones
+
+// Estado de productos y carrito
+let productosColeccion = [];
+let carrito = JSON.parse(localStorage.getItem('carshop_carrito')) || [];
+
+// Elementos del DOM
+const catalogoGrid = document.getElementById('catalogo-grid');
+const inputBuscador = document.getElementById('input-buscador');
+const btnAbrirCarrito = document.getElementById('btn-abrir-carrito');
+const btnCerrarCarrito = document.getElementById('btn-cerrar-carrito');
+const modalCarrito = document.getElementById('modal-carrito');
+const carritoItemsDiv = document.getElementById('carrito-items');
+const carritoTotalEl = document.getElementById('carrito-total');
+const cartCountBadge = document.getElementById('cart-count');
+const btnCheckoutWhatsapp = document.getElementById('btn-checkout-whatsapp');
+const headerWhatsappLink = document.getElementById('header-whatsapp-link');
 const formCotizador = document.getElementById('form-cotizador');
 
-function iniciarCatalogo() {
-  cargarProductos();
-  initCotizador();
+// Configurar enlace del Header
+if (headerWhatsappLink) {
+  headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
+  headerWhatsappLink.textContent = `+${TELEFONO_WHATSAPP}`;
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', iniciarCatalogo);
-} else {
-  iniciarCatalogo();
-}
+// 1. CARGAR PRODUCTOS DESDE FIRESTORE EN TIEMPO REAL
+onSnapshot(collection(db, "productos"), (snapshot) => {
+  productosColeccion = [];
+  snapshot.forEach(doc => {
+    productosColeccion.push({ id: doc.id, ...doc.data() });
+  });
+  renderizarCatalogo(productosColeccion);
+  actualizarUIBagde();
+});
 
-// Cargar catálogo de productos activos en tiempo real
-function cargarProductos() {
-  const q = query(collection(db, "productos_servicios"), where("activo", "==", true));
+// 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
+function renderizarCatalogo(lista) {
+  if (!catalogoGrid) return;
+  
+  if (lista.length === 0) {
+    catalogoGrid.innerHTML = `<p class="loading-text">No se encontraron productos o servicios.</p>`;
+    return;
+  }
 
-  onSnapshot(q, (snapshot) => {
-    if (!gridContainer) return;
-    gridContainer.innerHTML = '';
+  catalogoGrid.innerHTML = '';
+  lista.forEach(p => {
+    const imagenUrl = (p.imagen && p.imagen.trim() !== "") 
+      ? p.imagen 
+      : "https://via.placeholder.com/300x200?text=CarShop+Iluminacion";
 
-    snapshot.forEach((doc) => {
-      const item = doc.data();
-      const card = document.createElement('div');
-      card.className = 'card-item';
+    const card = document.createElement('div');
+    card.className = 'card-producto';
+    card.innerHTML = `
+      <img src="${imagenUrl}" alt="${p.nombre}" class="producto-img" onerror="this.src='https://via.placeholder.com/300x200?text=Sin+Imagen'">
+      <div class="card-body">
+        <h3>${p.nombre}</h3>
+        <p class="precio">$${Number(p.precio).toLocaleString('es-AR')}</p>
+        <p class="stock">Stock disponible: ${p.stock}</p>
+        <button class="btn btn-primary full-width btn-agregar" data-id="${p.id}">
+          🛒 Agregar al Carrito
+        </button>
+      </div>
+    `;
 
-      const stockBadge = item.tipo === 'producto' 
-        ? `<span class="badge ${item.stock > 0 ? 'in-stock' : 'no-stock'}">${item.stock > 0 ? `Stock: ${item.stock}` : 'Sin Stock'}</span>`
-        : `<span class="badge servicio">Servicio</span>`;
-
-      const imgHtml = item.imagenUrl 
-        ? `<img src="${item.imagenUrl}" alt="${item.nombre}" class="card-img">`
-        : `<div class="no-img">Sin Imagen</div>`;
-
-      card.innerHTML = `
-        ${imgHtml}
-        <div class="card-body">
-          <div class="card-header">
-            <h3>${item.nombre}</h3>
-            ${stockBadge}
-          </div>
-          <p class="categoria">${item.categoria}</p>
-          <p class="precio">$${item.precioVenta.toLocaleString('es-AR')}</p>
-        </div>
-      `;
-      gridContainer.appendChild(card);
+    // Evento de agregar al carrito
+    card.querySelector('.btn-agregar').addEventListener('click', () => {
+      agregarAlCarrito(p);
     });
+
+    catalogoGrid.appendChild(card);
   });
 }
 
-// Enviar presupuesto a WhatsApp
-function initCotizador() {
-  if (!formCotizador) return;
+// 3. LÓGICA DEL BUSCADOR EN TIEMPO REAL
+if (inputBuscador) {
+  inputBuscador.addEventListener('input', (e) => {
+    const busqueda = e.target.value.toLowerCase().trim();
+    const filtrados = productosColeccion.filter(p => 
+      p.nombre.toLowerCase().includes(busqueda)
+    );
+    renderizarCatalogo(filtrados);
+  });
+}
 
+// 4. FUNCIONES DEL CARRITO DE COMPRAS
+function agregarAlCarrito(producto) {
+  const existe = carrito.find(item => item.id === producto.id);
+  if (existe) {
+    if (existe.cantidad < producto.stock) {
+      existe.cantidad++;
+    } else {
+      alert("No hay más stock disponible de este producto.");
+      return;
+    }
+  } else {
+    carrito.push({
+      id: producto.id,
+      nombre: producto.nombre,
+      precio: Number(producto.precio),
+      cantidad: 1
+    });
+  }
+  guardarCarrito();
+  actualizarUIBagde();
+  abrirModalCarrito();
+}
+
+function eliminarDelCarrito(id) {
+  carrito = carrito.filter(item => item.id !== id);
+  guardarCarrito();
+  renderizarCarritoModal();
+  actualizarUIBagde();
+}
+
+function cambiarCantidad(id, cambio) {
+  const item = carrito.find(i => i.id === id);
+  if (!item) return;
+
+  item.cantidad += cambio;
+  if (item.cantidad <= 0) {
+    eliminarDelCarrito(id);
+  } else {
+    guardarCarrito();
+    renderizarCarritoModal();
+    actualizarUIBagde();
+  }
+}
+
+function guardarCarrito() {
+  localStorage.setItem('carshop_carrito', JSON.stringify(carrito));
+}
+
+function actualizarUIBagde() {
+  const totalItems = carrito.reduce((acc, item) => acc + item.cantidad, 0);
+  if (cartCountBadge) cartCountBadge.textContent = totalItems;
+}
+
+function renderizarCarritoModal() {
+  if (!carritoItemsDiv) return;
+
+  if (carrito.length === 0) {
+    carritoItemsDiv.innerHTML = `<p style="color:#aaa; text-align:center; padding: 20px;">El carrito está vacío.</p>`;
+    carritoTotalEl.textContent = "$0";
+    return;
+  }
+
+  carritoItemsDiv.innerHTML = '';
+  let total = 0;
+
+  carrito.forEach(item => {
+    const subtotal = item.precio * item.cantidad;
+    total += subtotal;
+
+    const row = document.createElement('div');
+    row.className = 'carrito-item';
+    row.innerHTML = `
+      <div class="item-info">
+        <strong>${item.nombre}</strong>
+        <span>$${item.precio.toLocaleString('es-AR')} c/u</span>
+      </div>
+      <div class="item-controles">
+        <button class="btn-cant btn-restar">-</button>
+        <span class="cant-num">${item.cantidad}</span>
+        <button class="btn-cant btn-sumar">+</button>
+        <button class="btn-eliminar">&times;</button>
+      </div>
+    `;
+
+    row.querySelector('.btn-restar').addEventListener('click', () => cambiarCantidad(item.id, -1));
+    row.querySelector('.btn-sumar').addEventListener('click', () => cambiarCantidad(item.id, 1));
+    row.querySelector('.btn-eliminar').addEventListener('click', () => eliminarDelCarrito(item.id));
+
+    carritoItemsDiv.appendChild(row);
+  });
+
+  carritoTotalEl.textContent = `$${total.toLocaleString('es-AR')}`;
+}
+
+// 5. ABRIR / CERRAR MODAL DEL CARRITO
+function abrirModalCarrito() {
+  renderizarCarritoModal();
+  modalCarrito.classList.remove('hidden');
+}
+
+function cerrarModalCarrito() {
+  modalCarrito.classList.add('hidden');
+}
+
+if (btnAbrirCarrito) btnAbrirCarrito.addEventListener('click', abrirModalCarrito);
+if (btnCerrarCarrito) btnCerrarCarrito.addEventListener('click', cerrarModalCarrito);
+
+// 6. ENVIAR PEDIDO DEL CARRITO A WHATSAPP
+if (btnCheckoutWhatsapp) {
+  btnCheckoutWhatsapp.addEventListener('click', () => {
+    if (carrito.length === 0) {
+      alert("Agregá al menos un producto al carrito para continuar.");
+      return;
+    }
+
+    let mensaje = "👋 Hola *CarShop Iluminación*, me interesa comprar los siguientes productos:\n\n";
+    let total = 0;
+
+    carrito.forEach((item, index) => {
+      const subtotal = item.precio * item.cantidad;
+      total += subtotal;
+      mensaje += `${index + 1}. *${item.nombre}* x${item.cantidad} - $${subtotal.toLocaleString('es-AR')}\n`;
+    });
+
+    mensaje += `\n💰 *Total Estimado:* $${total.toLocaleString('es-AR')}\n\n`;
+    mensaje += "¿Tienen disponibilidad y turno disponible para coordinar?";
+
+    const url = `https://wa.me/${5492974114542}?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, '_blank');
+  });
+}
+
+// 7. COTIZADOR INDIVIDUAL (Formulario inferior)
+if (formCotizador) {
   formCotizador.addEventListener('submit', (e) => {
     e.preventDefault();
-    const marca = document.getElementById('cotiz-marca').value.trim();
-    const modelo = document.getElementById('cotiz-modelo').value.trim();
+    const marca = document.getElementById('cotiz-marca').value;
+    const modelo = document.getElementById('cotiz-modelo').value;
     const servicio = document.getElementById('cotiz-servicio').value;
-    const notas = document.getElementById('cotiz-notas').value.trim();
+    const notas = document.getElementById('cotiz-notas').value;
 
-    const telefonoTaller = "5492970000000"; // Reemplazar con el WhatsApp de CarShop
-    const mensaje = `Hola CarShop Iluminación! Quisiera pedir un presupuesto:%0A%0A` +
-      `🚗 *Vehículo:* ${marca} ${modelo}%0A` +
-      `💡 *Servicio:* ${servicio}%0A` +
-      `📝 *Notas:* ${notas || 'Ninguna'}`;
+    let mensaje = `👋 Hola *CarShop Iluminación*, quisiera cotizar un servicio:\n\n`;
+    mensaje += `🚗 *Vehículo:* ${marca} ${modelo}\n`;
+    mensaje += `🔧 *Servicio:* ${servicio}\n`;
+    if (notas) mensaje += `📝 *Detalles:* ${notas}\n`;
 
-    window.open(`https://wa.me/${telefonoTaller}?text=${mensaje}`, '_blank');
+    const url = `https://wa.me/${TELEFONO_WHATSAPP}?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, '_blank');
   });
 }
