@@ -23,13 +23,12 @@ const btnCheckoutWhatsapp = document.getElementById('btn-checkout-whatsapp');
 const headerWhatsappLink = document.getElementById('header-whatsapp-link');
 const formCotizador = document.getElementById('form-cotizador');
 
-// Configurar enlace de WhatsApp en el Header
 if (headerWhatsappLink) {
   headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
   headerWhatsappLink.textContent = `+${TELEFONO_WHATSAPP}`;
 }
 
-// 1. CARGAR PRODUCTOS DESDE FIRESTORE ('productos_servicios') EN TIEMPO REAL
+// 1. CARGAR PRODUCTOS DESDE FIRESTORE EN TIEMPO REAL
 onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
   productosColeccion = [];
   snapshot.forEach(doc => {
@@ -38,10 +37,7 @@ onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
   renderizarCatalogo(productosColeccion);
   actualizarUIBagde();
 }, (err) => {
-  console.error("Error al leer la colección productos_servicios:", err);
-  if (catalogoGrid) {
-    catalogoGrid.innerHTML = `<p class="loading-text">Error al cargar productos.</p>`;
-  }
+  console.error("Error al leer productos_servicios:", err);
 });
 
 // 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
@@ -54,17 +50,16 @@ function renderizarCatalogo(lista) {
   }
 
   catalogoGrid.innerHTML = '';
-  const fallbackImg = "https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=400&q=80";
 
   lista.forEach(p => {
     const precioNum = Number(p.precioVenta || p.precio || 0);
-    const fotoDirecta = (p.urlFoto || p.imagen || p.foto || "").trim();
-    const srcImagen = fotoDirecta !== "" ? fotoDirecta : fallbackImg;
+    // Lee directamente el campo de foto guardado por el Admin
+    const fotoDirecta = (p.urlFoto || p.imagen || p.foto || p.imagenUrl || p.url || "").trim();
 
     const card = document.createElement('div');
     card.className = 'card-producto';
     card.innerHTML = `
-      <img src="${srcImagen}" alt="${p.nombre}" class="producto-img">
+      <img src="${fotoDirecta}" alt="${p.nombre}" class="producto-img" referrerpolicy="no-referrer">
       <div class="card-body">
         <h3>${p.nombre}</h3>
         <p class="precio">$${precioNum.toLocaleString('es-AR')}</p>
@@ -75,13 +70,6 @@ function renderizarCatalogo(lista) {
       </div>
     `;
 
-    // Manejo seguro de imagen rota o bloqueada
-    const imgEl = card.querySelector('.producto-img');
-    imgEl.addEventListener('error', () => {
-      imgEl.src = fallbackImg;
-    });
-
-    // Evento para agregar producto al carrito
     card.querySelector('.btn-agregar').addEventListener('click', () => {
       agregarAlCarrito({ ...p, precio: precioNum });
     });
@@ -212,7 +200,7 @@ function cerrarModalCarrito() {
 if (btnAbrirCarrito) btnAbrirCarrito.addEventListener('click', abrirModalCarrito);
 if (btnCerrarCarrito) btnCerrarCarrito.addEventListener('click', cerrarModalCarrito);
 
-// 5. ENVIAR PEDIDO DEL CARRITO A WHATSAPP
+// 5. ENVIAR PEDIDO POR WHATSAPP
 if (btnCheckoutWhatsapp) {
   btnCheckoutWhatsapp.addEventListener('click', () => {
     if (carrito.length === 0) {
