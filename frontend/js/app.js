@@ -4,7 +4,7 @@ import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.
 // ==========================================
 // CONFIGURACIÓN DE TU NÚMERO DE WHATSAPP
 // ==========================================
-const TELEFONO_WHATSAPP = "5492974114542"; // Número configurado en tu header
+const TELEFONO_WHATSAPP = "5492974114542";
 
 // Estado de productos y carrito
 let productosColeccion = [];
@@ -23,25 +23,34 @@ const btnCheckoutWhatsapp = document.getElementById('btn-checkout-whatsapp');
 const headerWhatsappLink = document.getElementById('header-whatsapp-link');
 const formCotizador = document.getElementById('form-cotizador');
 
-// Configurar enlace del Header
 if (headerWhatsappLink) {
   headerWhatsappLink.href = `https://wa.me/${TELEFONO_WHATSAPP}`;
 }
 
-// 1. CARGAR DESDE FIRESTORE (Colección 'inventario')
-onSnapshot(collection(db, "inventario"), (snapshot) => {
-  productosColeccion = [];
-  snapshot.forEach(doc => {
-    productosColeccion.push({ id: doc.id, ...doc.data() });
-  });
+// 1. ESCUCHAR AMBAS COLECCIONES (inventario y productos) EN TIEMPO REAL
+let itemsInventario = [];
+let itemsProductos = [];
+
+function actualizarVistaCombinada() {
+  // Une ambas listas sin duplicar IDs
+  const mapa = new Map();
+  [...itemsInventario, ...itemsProductos].forEach(item => mapa.set(item.id, item));
+  productosColeccion = Array.from(mapa.values());
+  
+  console.log("Ítems totales encontrados en Firebase:", productosColeccion.length);
   renderizarCatalogo(productosColeccion);
   actualizarUIBagde();
-}, (error) => {
-  console.error("Error al leer Firestore:", error);
-  if (catalogoGrid) {
-    catalogoGrid.innerHTML = `<p class="loading-text">Error al cargar inventario.</p>`;
-  }
-});
+}
+
+onSnapshot(collection(db, "inventario"), (snapshot) => {
+  itemsInventario = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  actualizarVistaCombinada();
+}, (err) => console.log("Nota en inventario:", err));
+
+onSnapshot(collection(db, "productos"), (snapshot) => {
+  itemsProductos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  actualizarVistaCombinada();
+}, (err) => console.log("Nota en productos:", err));
 
 // 2. RENDERIZAR TARJETAS EN EL CATÁLOGO
 function renderizarCatalogo(lista) {
@@ -54,8 +63,8 @@ function renderizarCatalogo(lista) {
 
   catalogoGrid.innerHTML = '';
   lista.forEach(p => {
-    // Soportar variantes de nombres de campos del Admin
-    const precio = Number(p.precioVenta || p.precio || 0);
+    // Detecta precioVenta (del Admin) o precio estándar
+    const precioNum = Number(p.precioVenta || p.precio || 0);
     const imagenUrl = (p.imagen || p.foto || p.urlFoto || "").trim() !== "" 
       ? (p.imagen || p.foto || p.urlFoto)
       : "https://via.placeholder.com/300x200?text=CarShop+Iluminacion";
@@ -66,8 +75,8 @@ function renderizarCatalogo(lista) {
       <img src="${imagenUrl}" alt="${p.nombre}" class="producto-img" onerror="this.src='https://via.placeholder.com/300x200?text=Sin+Imagen'">
       <div class="card-body">
         <h3>${p.nombre}</h3>
-        <p class="precio">$${precio.toLocaleString('es-AR')}</p>
-        <p class="stock">Stock disponible: ${p.stock}</p>
+        <p class="precio">$${precioNum.toLocaleString('es-AR')}</p>
+        <p class="stock">Stock disponible: ${p.stock ?? 1}</p>
         <button class="btn btn-primary full-width btn-agregar" data-id="${p.id}">
           🛒 Agregar al Carrito
         </button>
@@ -75,7 +84,7 @@ function renderizarCatalogo(lista) {
     `;
 
     card.querySelector('.btn-agregar').addEventListener('click', () => {
-      agregarAlCarrito({ ...p, precio });
+      agregarAlCarrito({ ...p, precio: precioNum });
     });
 
     catalogoGrid.appendChild(card);
@@ -97,8 +106,10 @@ if (inputBuscador) {
 // 4. CARRITO DE COMPRAS
 function agregarAlCarrito(producto) {
   const existe = carrito.find(item => item.id === producto.id);
+  const stockDisponible = producto.stock ?? 99;
+
   if (existe) {
-    if (existe.cantidad < producto.stock) {
+    if (existe.cantidad < stockDisponible) {
       existe.cantidad++;
     } else {
       alert("No hay más stock disponible de este producto.");
@@ -200,11 +211,11 @@ function cerrarModalCarrito() {
 if (btnAbrirCarrito) btnAbrirCarrito.addEventListener('click', abrirModalCarrito);
 if (btnCerrarCarrito) btnCerrarCarrito.addEventListener('click', cerrarModalCarrito);
 
-// 5. ENVIAR PEDIDO POR WHATSAPP
+// 5. ENVIAR PEDIDO A WHATSAPP
 if (btnCheckoutWhatsapp) {
   btnCheckoutWhatsapp.addEventListener('click', () => {
     if (carrito.length === 0) {
-      alert("Agregá al menos un producto al carrito para continuar.");
+      alert("Agregá al menos un producto al carrito.");
       return;
     }
 
@@ -225,7 +236,7 @@ if (btnCheckoutWhatsapp) {
   });
 }
 
-// 6. COTIZADOR
+// 6. COTIZADOR POR WHATSAPP
 if (formCotizador) {
   formCotizador.addEventListener('submit', (e) => {
     e.preventDefault();
