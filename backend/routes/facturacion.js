@@ -103,7 +103,7 @@ router.post('/emitir', async (req, res) => {
       'ImpIVA': 0,
       'ImpTrib': 0,
       'MonId': 'PES',
-      'MonCot': 1
+      'MonCotiz': 1
     };
 
     // Si incluye servicios (Concepto 2 o 3), AFIP exige fechas de servicio y vencimiento
