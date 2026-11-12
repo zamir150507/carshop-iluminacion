@@ -13,36 +13,58 @@ const afip = new Afip({
 
 /**
  * POST /api/facturacion/emitir
- * Body expect: { ventaId: "vta_123", cuitDniCliente: "20398887776", tipoDoc: 80, tipoFactura: 6, total: 35000 }
- * Tipos de Comprobante: 1 = Factura A, 6 = Factura B, 11 = Factura C
+ * Body: { ventaId, cuitDniCliente, tipoDoc, tipoFactura, total, concepto }
+ * Tipos de Comprobante: 11 = Factura C, 6 = Factura B, 1 = Factura A
  * Tipos de Documento: 80 = CUIT, 96 = DNI, 99 = Consumidor Final sin identificar
  */
 router.post('/emitir', async (req, res) => {
   try {
-    const { ventaId, cuitDniCliente, tipoDoc, tipoFactura, total } = req.body;
+    const {
+      ventaId,
+      cuitDniCliente,
+      tipoDoc = 99,
+      tipoFactura = 11,
+      total,
+      concepto = 1
+    } = req.body;
 
     const puntoVenta = parseInt(process.env.ARCA_PUNTO_VENTA, 10);
+    const cbteTipo = parseInt(tipoFactura, 10) || 11;
+    const docTipoNum = parseInt(tipoDoc, 10) || 99;
+    const conceptoNum = parseInt(concepto, 10) || 1;
+    const importeTotal = Number(total);
+
+    if (!importeTotal || importeTotal <= 0) {
+      return res.status(400).json({ success: false, error: 'El importe total a facturar debe ser mayor a 0.' });
+    }
+
+    // Si es Consumidor Final sin identificar (99), AFIP exige DocNro = 0
+    const docNroLimpio = docTipoNum === 99
+      ? 0
+      : (Number(String(cuitDniCliente || '').replace(/\D/g, '')) || 0);
 
     // 1. Obtener el número del último comprobante emitido en ARCA
-    const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVenta, tipoFactura);
+    const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVenta, cbteTipo);
     const nextVoucher = lastVoucher + 1;
 
-    const fechaHoy = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    // Fecha actual en hora de Argentina (UTC-3) formato YYYYMMDD
+    const ahoraArgentina = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const fechaHoy = ahoraArgentina.toISOString().split('T')[0].replace(/-/g, '');
 
-    // 2. Estructura de la solicitud para el Web Service WSFE de ARCA
+    // 2. Estructura de la solicitud para WSFE de ARCA
     const dataFactura = {
       'CantReg': 1,
       'PtoVta': puntoVenta,
-      'CbteTipo': tipoFactura,
-      'Concepto': 1, // 1 = Productos, 2 = Servicios, 3 = Productos y Servicios
-      'DocTipo': tipoDoc,
-      'DocNro': parseFloat(cuitDniCliente) || 0,
+      'CbteTipo': cbteTipo,
+      'Concepto': conceptoNum, // 1 = Productos, 2 = Servicios, 3 = Productos y Servicios
+      'DocTipo': docTipoNum,
+      'DocNro': docNroLimpio,
       'CbteDesde': nextVoucher,
       'CbteHasta': nextVoucher,
       'CbteFch': fechaHoy,
-      'ImpTotal': total,
+      'ImpTotal': importeTotal,
       'ImpTotConc': 0,
-      'ImpNeto': total, // Si es Factura C o Exento, el ImpNeto equivale al ImpTotal
+      'ImpNeto': importeTotal,
       'ImpOpEx': 0,
       'ImpIVA': 0,
       'ImpTrib': 0,
@@ -50,7 +72,14 @@ router.post('/emitir', async (req, res) => {
       'MonCot': 1
     };
 
-    // 3. Solicitud del CAE (Código de Autorización Electrónico)
+    // Si incluye servicios (Concepto 2 o 3), AFIP exige fechas de servicio y vencimiento de pago
+    if (conceptoNum === 2 || conceptoNum === 3) {
+      dataFactura['FchServDesde'] = fechaHoy;
+      dataFactura['FchServHasta'] = fechaHoy;
+      dataFactura['FchVtoPago'] = fechaHoy;
+    }
+
+    // 3. Solicitud del CAE a ARCA
     const resARCA = await afip.ElectronicBilling.createVoucher(dataFactura);
 
     const datosFactura = {
@@ -58,7 +87,9 @@ router.post('/emitir', async (req, res) => {
       vencimientoCae: resARCA.CAEFchVto,
       numeroComprobante: nextVoucher,
       puntoVenta: puntoVenta,
-      tipoFactura: tipoFactura,
+      tipoFactura: cbteTipo,
+      docTipo: docTipoNum,
+      docNro: docNroLimpio,
       fechaEmision: new Date().toISOString()
     };
 

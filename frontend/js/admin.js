@@ -1,275 +1,548 @@
-import { db, auth } from './firebase.js';
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged 
+import { auth, db } from './firebase.js';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot,
-  query,
-  orderBy,
-  doc,
+import {
+  collection,
+  addDoc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  doc,
+  onSnapshot,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+// URL del Backend en Render
 const BACKEND_URL = "https://carshop-backend-2t7v.onrender.com";
 
-// Elementos del DOM
-const loginContainer = document.getElementById('login-container');
-const adminContainer = document.getElementById('admin-container');
-const formLogin = document.getElementById('form-login');
-const btnLogout = document.getElementById('btn-logout');
+// Estado global
+let inventario = [];
+let ticketVenta = [];
+
+// Referencias DOM - Auth
+const loginSection = document.getElementById('admin-login-section');
+const panelWrapper = document.getElementById('admin-panel-wrapper');
+const formLogin = document.getElementById('form-admin-login');
+const btnCerrarSesion = document.getElementById('btn-cerrar-sesion');
+
+// Referencias DOM - Formulario Inventario
 const formNuevoItem = document.getElementById('form-nuevo-item');
-const formVenta = document.getElementById('form-venta');
-const selectVentaItem = document.getElementById('venta-item');
-const tablaInventarioBody = document.getElementById('tabla-inventario-body');
-const alertasContainer = document.getElementById('alertas-container');
+const formItemTitulo = document.getElementById('form-item-titulo');
+const editItemIdInput = document.getElementById('edit-item-id');
+const btnGuardarItem = document.getElementById('btn-guardar-item');
+const btnCancelarEdicion = document.getElementById('btn-cancelar-edicion');
+const inventarioTbody = document.getElementById('inventario-tbody');
 
-// Elementos del Modal de Edición
-const modalEditar = document.getElementById('modal-editar');
-const formEditarItem = document.getElementById('form-editar-item');
-const btnCerrarModal = document.getElementById('btn-cerrar-modal');
+// Referencias DOM - Venta / Cobro / ARCA
+const selectProducto = document.getElementById('venta-producto');
+const inputPrecioUnitario = document.getElementById('venta-precio-unitario');
+const inputCantidad = document.getElementById('venta-cantidad');
+const btnAgregarTicket = document.getElementById('btn-agregar-al-ticket');
+const ticketListaDiv = document.getElementById('ticket-lista');
+const ticketTotalEl = document.getElementById('ticket-total-monto');
+const selectMetodoPago = document.getElementById('venta-metodo-pago');
+const checkEmitirArca = document.getElementById('venta-emitir-arca');
+const arcaClientePanel = document.getElementById('arca-cliente-panel');
+const selectArcaDocTipo = document.getElementById('arca-doc-tipo');
+const grupoArcaDocNro = document.getElementById('grupo-arca-doc-nro');
+const inputArcaDocNro = document.getElementById('arca-doc-nro');
+const btnRegistrarVenta = document.getElementById('btn-registrar-venta');
 
-let inventarioProductos = [];
+// ==========================================
+// 1. AUTENTICACIÓN
+// ==========================================
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    if (loginSection) loginSection.classList.add('hidden');
+    if (panelWrapper) panelWrapper.classList.remove('hidden');
+    iniciarEscuchaInventario();
+  } else {
+    if (loginSection) loginSection.classList.remove('hidden');
+    if (panelWrapper) panelWrapper.classList.add('hidden');
+  }
+});
 
-// Inicializador seguro
-function iniciarApp() {
-  initAuthListeners();
-  initFormListeners();
-  initModalListeners();
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', iniciarApp);
-} else {
-  iniciarApp();
-}
-
-// Escuchador de Autenticación
-function initAuthListeners() {
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      loginContainer.style.display = 'none';
-      adminContainer.style.display = 'block';
-      escucharInventario();
-    } else {
-      loginContainer.style.display = 'flex';
-      adminContainer.style.display = 'none';
-    }
-  });
-
+if (formLogin) {
   formLogin.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = document.getElementById('login-email').value;
-    const password = document.getElementById('login-password').value;
-
+    const email = document.getElementById('login-email').value.trim();
+    const pass = document.getElementById('login-password').value;
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      console.error("Error al ingresar:", error);
-      alert("Credenciales incorrectas: " + error.message);
+      await signInWithEmailAndPassword(auth, email, pass);
+    } catch (err) {
+      alert("Error al iniciar sesión: " + err.message);
     }
   });
-
-  btnLogout.addEventListener('click', () => signOut(auth));
 }
 
-// Escuchador de Formularios (Crear y Vender)
-function initFormListeners() {
-  // Cargar nuevo producto
+if (btnCerrarSesion) {
+  btnCerrarSesion.addEventListener('click', async () => {
+    await signOut(auth);
+  });
+}
+
+// ==========================================
+// 2. INVENTARIO EN TIEMPO REAL
+// ==========================================
+let unsubscribeInventario = null;
+
+function iniciarEscuchaInventario() {
+  if (unsubscribeInventario) return;
+
+  unsubscribeInventario = onSnapshot(collection(db, "productos_servicios"), (snapshot) => {
+    inventario = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderizarTablaInventario();
+    actualizarSelectProductos();
+  }, (error) => {
+    console.error("Error leyendo inventario:", error);
+  });
+}
+
+function renderizarTablaInventario() {
+  if (!inventarioTbody) return;
+
+  if (inventario.length === 0) {
+    inventarioTbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#888;">No hay ítems cargados todavía.</td></tr>`;
+    return;
+  }
+
+  inventarioTbody.innerHTML = '';
+
+  inventario.forEach(item => {
+    const pCompra = Number(item.precioCompra || 0);
+    const pVenta = Number(item.precioVenta || item.precio || 0);
+    const stock = Number(item.stock ?? 0);
+    const stockMin = Number(item.stockMinimo ?? 1);
+    const foto = (item.urlFoto || item.imagen || item.foto || "").trim();
+
+    const esBajo = item.tipo !== 'servicio' && stock <= stockMin;
+    const badgeHtml = item.tipo === 'servicio'
+      ? `<span class="badge-ok">Servicio</span>`
+      : (esBajo ? `<span class="badge-low">Stock Bajo</span>` : `<span class="badge-ok">Normal</span>`);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        ${foto ? `<img src="${foto}" alt="${item.nombre}" class="inv-thumb" referrerpolicy="no-referrer">` : `<div class="inv-thumb"></div>`}
+      </td>
+      <td><strong>${item.nombre}</strong></td>
+      <td>${item.tipo || 'producto'}</td>
+      <td>${item.categoria || '-'}</td>
+      <td>$${pCompra.toLocaleString('es-AR')}</td>
+      <td>$${pVenta.toLocaleString('es-AR')}</td>
+      <td>${stock}</td>
+      <td>${badgeHtml}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn-edit" data-id="${item.id}">✏️ Editar</button>
+        <button class="btn-del" data-id="${item.id}">🗑️ Borrar</button>
+      </td>
+    `;
+
+    tr.querySelector('.btn-edit').addEventListener('click', () => cargarItemParaEditar(item));
+    tr.querySelector('.btn-del').addEventListener('click', () => eliminarItem(item));
+
+    inventarioTbody.appendChild(tr);
+  });
+}
+
+// ==========================================
+// 3. CREAR / EDITAR / BORRAR EN INVENTARIO
+// ==========================================
+if (formNuevoItem) {
   formNuevoItem.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    try {
-      const nuevoItem = {
-        nombre: document.getElementById('item-nombre').value.trim(),
-        tipo: document.getElementById('item-tipo').value,
-        categoria: document.getElementById('item-categoria').value.trim(),
-        precioCompra: Number(document.getElementById('item-precio-compra').value),
-        precioVenta: Number(document.getElementById('item-precio-venta').value),
-        stock: Number(document.getElementById('item-stock').value),
-        stockMinimo: Number(document.getElementById('item-stock-minimo').value),
-        imagenUrl: document.getElementById('item-imagen-url').value.trim(),
-        activo: true,
-        fechaAlta: new Date().toISOString()
-      };
+    const editId = editItemIdInput.value.trim();
+    const urlFoto = document.getElementById('item-url-foto').value.trim();
 
-      await addDoc(collection(db, "productos_servicios"), nuevoItem);
-      alert('¡Item registrado correctamente!');
-      formNuevoItem.reset();
-    } catch (error) {
-      console.error("Error al guardar item:", error);
-      alert("Error al registrar el item.");
+    const datos = {
+      nombre: document.getElementById('item-nombre').value.trim(),
+      tipo: document.getElementById('item-tipo').value,
+      categoria: document.getElementById('item-categoria').value.trim(),
+      precioCompra: Number(document.getElementById('item-precio-compra').value),
+      precioVenta: Number(document.getElementById('item-precio-venta').value),
+      stock: Number(document.getElementById('item-stock').value),
+      stockMinimo: Number(document.getElementById('item-stock-minimo').value),
+      urlFoto: urlFoto,
+      imagen: urlFoto
+    };
+
+    try {
+      btnGuardarItem.disabled = true;
+      btnGuardarItem.textContent = "Guardando...";
+
+      if (editId) {
+        await updateDoc(doc(db, "productos_servicios", editId), datos);
+        resetearFormularioItem();
+      } else {
+        datos.creadoEn = serverTimestamp();
+        await addDoc(collection(db, "productos_servicios"), datos);
+        formNuevoItem.reset();
+        document.getElementById('item-stock-minimo').value = 2;
+      }
+    } catch (err) {
+      console.error("Error al guardar item:", err);
+      alert("Error al guardar el ítem: " + err.message);
+    } finally {
+      btnGuardarItem.disabled = false;
+      if (!editItemIdInput.value) {
+        btnGuardarItem.textContent = "Guardar en Inventario";
+      }
     }
   });
+}
 
-  // Registrar Venta
-  formVenta.addEventListener('submit', async (e) => {
-    e.preventDefault();
+function cargarItemParaEditar(item) {
+  editItemIdInput.value = item.id;
+  document.getElementById('item-nombre').value = item.nombre || '';
+  document.getElementById('item-tipo').value = item.tipo || 'producto';
+  document.getElementById('item-categoria').value = item.categoria || '';
+  document.getElementById('item-precio-compra').value = item.precioCompra ?? 0;
+  document.getElementById('item-precio-venta').value = item.precioVenta ?? item.precio ?? 0;
+  document.getElementById('item-stock').value = item.stock ?? 0;
+  document.getElementById('item-stock-minimo').value = item.stockMinimo ?? 2;
+  document.getElementById('item-url-foto').value = item.urlFoto || item.imagen || '';
 
-    const idProducto = selectVentaItem.value;
-    const cantidad = Number(document.getElementById('venta-cantidad').value);
-    const metodoPago = document.getElementById('venta-metodo').value;
-    const emitirArca = document.getElementById('venta-arca').checked;
+  formItemTitulo.textContent = "Editando: " + item.nombre;
+  btnGuardarItem.textContent = "Guardar Cambios";
+  btnCancelarEdicion.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
-    if (!idProducto) {
-      alert("Seleccioná un item válido.");
+function resetearFormularioItem() {
+  editItemIdInput.value = '';
+  formNuevoItem.reset();
+  document.getElementById('item-stock-minimo').value = 2;
+  formItemTitulo.textContent = "Cargar Nuevo Item";
+  btnGuardarItem.textContent = "Guardar en Inventario";
+  btnCancelarEdicion.classList.add('hidden');
+}
+
+if (btnCancelarEdicion) {
+  btnCancelarEdicion.addEventListener('click', resetearFormularioItem);
+}
+
+async function eliminarItem(item) {
+  if (!confirm(`¿Seguro que querés eliminar "${item.nombre}" del inventario?`)) return;
+  try {
+    await deleteDoc(doc(db, "productos_servicios", item.id));
+  } catch (err) {
+    alert("Error al eliminar: " + err.message);
+  }
+}
+
+// ==========================================
+// 4. PUNTO DE VENTA (MULTI-ITEM + PRECIO EDITABLE)
+// ==========================================
+function actualizarSelectProductos() {
+  if (!selectProducto) return;
+  const seleccionPrevia = selectProducto.value;
+
+  selectProducto.innerHTML = `<option value="">-- Seleccionar producto o servicio --</option>`;
+  inventario.forEach(item => {
+    const pVenta = Number(item.precioVenta || item.precio || 0);
+    const opt = document.createElement('option');
+    opt.value = item.id;
+    opt.textContent = `${item.nombre} - $${pVenta.toLocaleString('es-AR')} (Stock: ${item.stock ?? 0})`;
+    selectProducto.appendChild(opt);
+  });
+
+  if (seleccionPrevia) {
+    selectProducto.value = seleccionPrevia;
+  }
+}
+
+// Al elegir un producto, autocompleta su precio de venta para que puedas editarlo libremente
+if (selectProducto) {
+  selectProducto.addEventListener('change', () => {
+    const id = selectProducto.value;
+    const prod = inventario.find(p => p.id === id);
+    if (prod) {
+      inputPrecioUnitario.value = Number(prod.precioVenta || prod.precio || 0);
+    } else {
+      inputPrecioUnitario.value = '';
+    }
+  });
+}
+
+// Botón "Agregar Ítem al Ticket de Venta"
+if (btnAgregarTicket) {
+  btnAgregarTicket.addEventListener('click', () => {
+    const id = selectProducto.value;
+    if (!id) {
+      alert("Seleccioná primero un producto o servicio.");
       return;
     }
 
-    try {
-      const res = await fetch(`${BACKEND_URL}/caja/registrar-venta`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: [{ id: idProducto, cantidad }],
-          metodoPago,
-          emitirArca
-        })
-      });
+    const prod = inventario.find(p => p.id === id);
+    if (!prod) return;
 
-      const data = await res.json();
-      if (res.ok) {
-        alert('¡Venta registrada con éxito!');
-        formVenta.reset();
-      } else {
-        alert('Error: ' + data.error);
-      }
-    } catch (error) {
-      console.error("Error al conectar con el servidor de caja:", error);
-      alert("Error de conexión con el backend.");
+    const precioUnitario = Number(inputPrecioUnitario.value);
+    const cantidad = Number(inputCantidad.value);
+
+    if (isNaN(precioUnitario) || precioUnitario < 0) {
+      alert("Ingresá un precio de venta válido.");
+      return;
     }
+
+    if (isNaN(cantidad) || cantidad < 1) {
+      alert("La cantidad debe ser al menos 1.");
+      return;
+    }
+
+    // Verificar stock disponible (si es producto)
+    const yaEnTicket = ticketVenta
+      .filter(i => i.id === id)
+      .reduce((acc, i) => acc + i.cantidad, 0);
+
+    if (prod.tipo !== 'servicio' && (yaEnTicket + cantidad) > Number(prod.stock || 0)) {
+      alert(`Stock insuficiente para "${prod.nombre}". Disponible: ${prod.stock}`);
+      return;
+    }
+
+    // Si ya existe el mismo producto con el mismo precio, sumamos cantidad
+    const existente = ticketVenta.find(i => i.id === id && i.precioUnitario === precioUnitario);
+    if (existente) {
+      existente.cantidad += cantidad;
+      existente.subtotal = existente.cantidad * existente.precioUnitario;
+    } else {
+      ticketVenta.push({
+        id: prod.id,
+        nombre: prod.nombre,
+        tipo: prod.tipo || 'producto',
+        cantidad: cantidad,
+        precioUnitario: precioUnitario,
+        subtotal: cantidad * precioUnitario
+      });
+    }
+
+    // Limpiar selección para agregar otro producto cómodo
+    selectProducto.value = '';
+    inputPrecioUnitario.value = '';
+    inputCantidad.value = 1;
+
+    renderizarTicketVenta();
   });
 }
 
-// Lógica del Modal de Edición
-function initModalListeners() {
-  btnCerrarModal.addEventListener('click', () => {
-    modalEditar.style.display = 'none';
-  });
+function renderizarTicketVenta() {
+  if (!ticketListaDiv || !ticketTotalEl) return;
 
-  window.addEventListener('click', (e) => {
-    if (e.target === modalEditar) {
-      modalEditar.style.display = 'none';
-    }
-  });
-
-  formEditarItem.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('edit-id').value;
-
-    try {
-      const docRef = doc(db, "productos_servicios", id);
-      await updateDoc(docRef, {
-        nombre: document.getElementById('edit-nombre').value.trim(),
-        tipo: document.getElementById('edit-tipo').value,
-        categoria: document.getElementById('edit-categoria').value.trim(),
-        precioCompra: Number(document.getElementById('edit-precio-compra').value),
-        precioVenta: Number(document.getElementById('edit-precio-venta').value),
-        stock: Number(document.getElementById('edit-stock').value),
-        stockMinimo: Number(document.getElementById('edit-stock-minimo').value),
-        imagenUrl: document.getElementById('edit-imagen-url').value.trim()
-      });
-
-      alert('¡Producto actualizado con éxito!');
-      modalEditar.style.display = 'none';
-    } catch (error) {
-      console.error("Error al actualizar item:", error);
-      alert("Error al intentar modificar el producto.");
-    }
-  });
-}
-
-// Función global para abrir modal de edición (invocada desde los botones de la tabla)
-window.abrirModalEditar = (id) => {
-  const item = inventarioProductos.find(p => p.id === id);
-  if (!item) return;
-
-  document.getElementById('edit-id').value = item.id;
-  document.getElementById('edit-nombre').value = item.nombre;
-  document.getElementById('edit-tipo').value = item.tipo;
-  document.getElementById('edit-categoria').value = item.categoria;
-  document.getElementById('edit-precio-compra').value = item.precioCompra;
-  document.getElementById('edit-precio-venta').value = item.precioVenta;
-  document.getElementById('edit-stock').value = item.stock;
-  document.getElementById('edit-stock-minimo').value = item.stockMinimo;
-  document.getElementById('edit-imagen-url').value = item.imagenUrl || '';
-
-  modalEditar.style.display = 'flex';
-};
-
-// Función global para eliminar item de Firestore
-window.eliminarItem = async (id, nombre) => {
-  const confirmar = confirm(`¿Estás seguro de que querés eliminar "${nombre}" del inventario?`);
-  if (!confirmar) return;
-
-  try {
-    await deleteDoc(doc(db, "productos_servicios", id));
-    alert('Item eliminado correctamente.');
-  } catch (error) {
-    console.error("Error al eliminar item:", error);
-    alert("Error al intentar borrar el producto.");
+  if (ticketVenta.length === 0) {
+    ticketListaDiv.innerHTML = `<p style="color:#777; font-size:0.85rem; margin:4px 0;">Todavía no agregaste ítems al ticket.</p>`;
+    ticketTotalEl.textContent = "$0";
+    return;
   }
-};
 
-// Escuchar cambios en la base de datos en tiempo real
-function escucharInventario() {
-  const q = query(collection(db, "productos_servicios"), orderBy("fechaAlta", "desc"));
-  
-  onSnapshot(q, (snapshot) => {
-    tablaInventarioBody.innerHTML = '';
-    selectVentaItem.innerHTML = '<option value="">Seleccionar Item...</option>';
-    alertasContainer.innerHTML = '';
-    inventarioProductos = [];
+  ticketListaDiv.innerHTML = '';
+  let totalGeneral = 0;
 
-    snapshot.forEach((docSnap) => {
-      const item = { id: docSnap.id, ...docSnap.data() };
-      inventarioProductos.push(item);
+  ticketVenta.forEach((item, index) => {
+    totalGeneral += item.subtotal;
 
-      // 1. Renderizar fila con botones de Acción
-      const fila = document.createElement('tr');
-      const imgTd = item.imagenUrl 
-        ? `<img src="${item.imagenUrl}" alt="${item.nombre}" class="table-thumb">`
-        : `<span class="no-thumb">Sin foto</span>`;
+    const row = document.createElement('div');
+    row.className = 'ticket-item';
+    row.innerHTML = `
+      <div class="ticket-item-info">
+        <strong>${item.cantidad}x</strong> ${item.nombre}
+        <div style="font-size:0.78rem; color:#999;">$${item.precioUnitario.toLocaleString('es-AR')} c/u</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="ticket-item-sub">$${item.subtotal.toLocaleString('es-AR')}</span>
+        <button type="button" class="btn-quitar-item" title="Quitar">✖</button>
+      </div>
+    `;
 
-      fila.innerHTML = `
-        <td>${imgTd}</td>
-        <td><strong>${item.nombre}</strong></td>
-        <td>${item.tipo}</td>
-        <td>${item.categoria}</td>
-        <td>$${item.precioCompra.toLocaleString('es-AR')}</td>
-        <td>$${item.precioVenta.toLocaleString('es-AR')}</td>
-        <td>${item.stock}</td>
-        <td>
-          <span class="badge ${item.stock <= item.stockMinimo && item.tipo === 'producto' ? 'badge-danger' : 'badge-success'}">
-            ${item.stock <= item.stockMinimo && item.tipo === 'producto' ? 'Stock Bajo' : 'Normal'}
-          </span>
-        </td>
-        <td>
-          <div class="actions-cell">
-            <button class="btn-edit" onclick="abrirModalEditar('${item.id}')">✏️ Editar</button>
-            <button class="btn-delete" onclick="eliminarItem('${item.id}', '${item.nombre.replace(/'/g, "\\'")}')">🗑️ Borrar</button>
-          </div>
-        </td>
-      `;
-      tablaInventarioBody.appendChild(fila);
-
-      // 2. Cargar en el desplegable de ventas
-      const option = document.createElement('option');
-      option.value = item.id;
-      option.textContent = `${item.nombre} ($${item.precioVenta}) - Stock: ${item.stock}`;
-      selectVentaItem.appendChild(option);
-
-      // 3. Generar Alerta si el stock es crítico
-      if (item.tipo === 'producto' && item.stock <= item.stockMinimo) {
-        const alerta = document.createElement('div');
-        alerta.className = 'alert alert-warning';
-        alerta.innerHTML = `⚠️ <strong>ALERTA DE STOCK:</strong> El producto <strong>${item.nombre}</strong> le quedan ${item.stock} unidades (Mínimo: ${item.stockMinimo}).`;
-        alertasContainer.appendChild(alerta);
-      }
+    row.querySelector('.btn-quitar-item').addEventListener('click', () => {
+      ticketVenta.splice(index, 1);
+      renderizarTicketVenta();
     });
+
+    ticketListaDiv.appendChild(row);
+  });
+
+  ticketTotalEl.textContent = `$${totalGeneral.toLocaleString('es-AR')}`;
+}
+
+// ==========================================
+// 5. DATOS DE CLIENTE ARCA (DNI / CUIT)
+// ==========================================
+if (checkEmitirArca) {
+  checkEmitirArca.addEventListener('change', () => {
+    if (checkEmitirArca.checked) {
+      arcaClientePanel.classList.remove('hidden');
+    } else {
+      arcaClientePanel.classList.add('hidden');
+    }
+  });
+}
+
+if (selectArcaDocTipo) {
+  selectArcaDocTipo.addEventListener('change', () => {
+    const tipo = selectArcaDocTipo.value;
+    if (tipo === "99") {
+      grupoArcaDocNro.classList.add('hidden');
+      inputArcaDocNro.value = '';
+    } else {
+      grupoArcaDocNro.classList.remove('hidden');
+      inputArcaDocNro.placeholder = tipo === "80" ? "Ej: 20471234567 (11 dígitos)" : "Ej: 47123456 (7 u 8 dígitos)";
+    }
+  });
+}
+
+// ==========================================
+// 6. REGISTRAR VENTA Y EMITIR FACTURA ARCA
+// ==========================================
+if (btnRegistrarVenta) {
+  btnRegistrarVenta.addEventListener('click', async () => {
+    // Si el ticket está vacío pero hay un producto seleccionado arriba, lo tomamos automáticamente
+    let itemsAFacturar = [...ticketVenta];
+
+    if (itemsAFacturar.length === 0 && selectProducto.value) {
+      const prod = inventario.find(p => p.id === selectProducto.value);
+      const precioUnit = Number(inputPrecioUnitario.value || prod.precioVenta || 0);
+      const cant = Number(inputCantidad.value || 1);
+
+      if (prod.tipo !== 'servicio' && cant > Number(prod.stock || 0)) {
+        alert(`Stock insuficiente para "${prod.nombre}". Disponible: ${prod.stock}`);
+        return;
+      }
+
+      itemsAFacturar.push({
+        id: prod.id,
+        nombre: prod.nombre,
+        tipo: prod.tipo || 'producto',
+        cantidad: cant,
+        precioUnitario: precioUnit,
+        subtotal: cant * precioUnit
+      });
+    }
+
+    if (itemsAFacturar.length === 0) {
+      alert("Agregá al menos un producto o servicio al ticket para registrar la venta.");
+      return;
+    }
+
+    const totalVenta = itemsAFacturar.reduce((acc, i) => acc + i.subtotal, 0);
+    const metodoPago = selectMetodoPago.value;
+    const emitirFactura = checkEmitirArca.checked;
+
+    // Validar datos de documento para ARCA
+    let docTipo = 99;
+    let docNro = 0;
+
+    if (emitirFactura) {
+      docTipo = Number(selectArcaDocTipo.value);
+      const docRaw = (inputArcaDocNro.value || "").replace(/\D/g, '');
+
+      if (docTipo === 96) {
+        if (docRaw.length < 7 || docRaw.length > 8) {
+          alert("Para facturar con DNI ingresá un número válido de 7 u 8 dígitos.");
+          inputArcaDocNro.focus();
+          return;
+        }
+        docNro = Number(docRaw);
+      } else if (docTipo === 80) {
+        if (docRaw.length !== 11) {
+          alert("Para facturar con CUIT ingresá los 11 dígitos sin guiones.");
+          inputArcaDocNro.focus();
+          return;
+        }
+        docNro = Number(docRaw);
+      } else {
+        docTipo = 99;
+        docNro = 0;
+      }
+    }
+
+    try {
+      btnRegistrarVenta.disabled = true;
+      btnRegistrarVenta.textContent = emitirFactura ? "Conectando con ARCA..." : "Registrando venta...";
+
+      let datosFactura = null;
+
+      // Si corresponde emitir factura electrónica en ARCA, llamamos al backend en Render
+      if (emitirFactura) {
+        const res = await fetch(`${BACKEND_URL}/registrar-venta`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: itemsAFacturar,
+            total: totalVenta,
+            metodoPago,
+            emitirFactura: true,
+            cliente: {
+              docTipo,
+              docNro
+            }
+          })
+        });
+
+        const textoRespuesta = await res.text();
+        let data;
+        try {
+          data = JSON.parse(textoRespuesta);
+        } catch {
+          throw new Error(`El servidor respondió con estado ${res.status} (ruta /registrar-venta no disponible en el backend).`);
+        }
+
+        if (!res.ok || data.error || data.ok === false) {
+          throw new Error(data.error || data.mensaje || `Error del servidor ARCA (${res.status})`);
+        }
+
+        datosFactura = data;
+      }
+
+      // Descontar stock en Firestore para cada producto vendido
+      for (const item of itemsAFacturar) {
+        if (item.tipo !== 'servicio') {
+          const prodActual = inventario.find(p => p.id === item.id);
+          if (prodActual) {
+            const nuevoStock = Math.max(0, Number(prodActual.stock || 0) - item.cantidad);
+            await updateDoc(doc(db, "productos_servicios", item.id), { stock: nuevoStock });
+          }
+        }
+      }
+
+      // Guardar el registro de la venta en Firestore
+      await addDoc(collection(db, "ventas"), {
+        items: itemsAFacturar,
+        total: totalVenta,
+        metodoPago,
+        facturadoArca: emitirFactura,
+        clienteDocTipo: docTipo,
+        clienteDocNro: docNro,
+        factura: datosFactura,
+        fecha: serverTimestamp()
+      });
+
+      // Resetear ticket
+      ticketVenta = [];
+      renderizarTicketVenta();
+      selectProducto.value = '';
+      inputPrecioUnitario.value = '';
+      inputCantidad.value = 1;
+      inputArcaDocNro.value = '';
+
+      if (emitirFactura && datosFactura) {
+        alert(
+          `✅ Venta registrada y Factura ARCA emitida!\n\n` +
+          `Comprobante N°: ${datosFactura.nroComprobante || datosFactura.cbteNro || '-'}\n` +
+          `CAE: ${datosFactura.cae || '-'}\n` +
+          `Vencimiento CAE: ${datosFactura.caeVencimiento || datosFactura.vtoCae || '-'}`
+        );
+      } else {
+        alert(`✅ Venta registrada correctamente por $${totalVenta.toLocaleString('es-AR')}.`);
+      }
+
+    } catch (err) {
+      console.error("Error al procesar la venta:", err);
+      alert("❌ Error al registrar la venta:\n" + err.message);
+    } finally {
+      btnRegistrarVenta.disabled = false;
+      btnRegistrarVenta.textContent = "Registrar Venta";
+    }
   });
 }
