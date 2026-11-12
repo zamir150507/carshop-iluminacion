@@ -14,7 +14,7 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// URL del Backend en Render
+// URL del Backend en Render (solo para emitir factura ARCA)
 const BACKEND_URL = "https://carshop-backend-2t7v.onrender.com";
 
 // Estado global
@@ -389,7 +389,7 @@ if (selectArcaDocTipo) {
 }
 
 // ==========================================
-// 6. REGISTRAR VENTA (/api/caja/venta) + ARCA (/api/facturacion/emitir)
+// 6. REGISTRAR VENTA EN FIRESTORE + FACTURA ARCA
 // ==========================================
 if (btnRegistrarVenta) {
   btnRegistrarVenta.addEventListener('click', async () => {
@@ -460,39 +460,9 @@ if (btnRegistrarVenta) {
 
     try {
       btnRegistrarVenta.disabled = true;
-      btnRegistrarVenta.textContent = "Registrando venta en caja...";
+      let datosFactura = null;
 
-      // PASO 1: Registrar la venta y descontar stock en /api/caja/venta
-      const resCaja = await fetch(`${BACKEND_URL}/api/caja/venta`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: itemsAFacturar,
-          metodoPago,
-          total: totalVenta,
-          cliente: {
-            nombre: tipoDoc === 99 ? "Consumidor Final" : `Doc ${cuitDniCliente}`,
-            tipoDoc,
-            cuitDni: cuitDniCliente
-          }
-        })
-      });
-
-      const textoCaja = await resCaja.text();
-      let dataCaja;
-      try {
-        dataCaja = JSON.parse(textoCaja);
-      } catch {
-        throw new Error(`El servidor de caja devolvió una respuesta inesperada (${resCaja.status}).`);
-      }
-
-      if (!resCaja.ok || !dataCaja.success) {
-        throw new Error(dataCaja.error || `Error al registrar venta (${resCaja.status})`);
-      }
-
-      const ventaId = dataCaja.ventaId;
-
-      // PASO 2: Si está marcado ARCA, emitir factura electrónica en /api/facturacion/emitir
+      // PASO 1: Si está marcado ARCA, emitir primero el comprobante electrónico
       if (emitirFactura) {
         btnRegistrarVenta.textContent = "Emitiendo factura en ARCA...";
 
@@ -500,7 +470,7 @@ if (btnRegistrarVenta) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ventaId,
+            ventaId: null,
             cuitDniCliente,
             tipoDoc,
             tipoFactura,
@@ -514,24 +484,61 @@ if (btnRegistrarVenta) {
         try {
           dataArca = JSON.parse(textoArca);
         } catch {
-          throw new Error(`La venta se guardó en caja, pero ARCA devolvió una respuesta inválida (${resArca.status}).`);
+          throw new Error(`El servidor ARCA devolvió una respuesta inválida (${resArca.status}).`);
         }
 
         if (!resArca.ok || !dataArca.success) {
-          throw new Error(`La venta se guardó en caja y se descontó stock, pero falló ARCA:\n${dataArca.error || 'Error desconocido'}`);
+          throw new Error(`Error al emitir factura en ARCA:\n${dataArca.error || 'Error desconocido'}`);
         }
 
-        const f = dataArca.datosFactura || {};
-        limpiarFormularioVenta();
+        datosFactura = dataArca.datosFactura || null;
+      }
+
+      btnRegistrarVenta.textContent = "Actualizando stock y caja...";
+
+      // PASO 2: Agrupar cantidades vendidas por producto y descontar stock en Firestore
+      const cantidadesDescontar = {};
+      for (const item of itemsAFacturar) {
+        if (item.tipo !== 'servicio' && item.id) {
+          cantidadesDescontar[item.id] = (cantidadesDescontar[item.id] || 0) + item.cantidad;
+        }
+      }
+
+      for (const [prodId, cantVendida] of Object.entries(cantidadesDescontar)) {
+        const prodActual = inventario.find(p => p.id === prodId);
+        if (prodActual) {
+          const nuevoStock = Math.max(0, Number(prodActual.stock || 0) - cantVendida);
+          await updateDoc(doc(db, "productos_servicios", prodId), { stock: nuevoStock });
+        }
+      }
+
+      // PASO 3: Guardar el registro de la venta en la colección 'ventas' de Firestore
+      await addDoc(collection(db, "ventas"), {
+        fecha: new Date().toISOString(),
+        creadoEn: serverTimestamp(),
+        items: itemsAFacturar,
+        total: totalVenta,
+        metodoPago,
+        cliente: {
+          nombre: tipoDoc === 99 ? "Consumidor Final" : `Doc ${cuitDniCliente}`,
+          tipoDoc,
+          cuitDni: cuitDniCliente
+        },
+        facturadoARCA: emitirFactura,
+        datosFactura
+      });
+
+      limpiarFormularioVenta();
+
+      if (emitirFactura && datosFactura) {
         alert(
           `✅ ¡Venta registrada y Factura ARCA emitida!\n\n` +
-          `Punto de Venta: ${f.puntoVenta || '-'}\n` +
-          `Comprobante N°: ${f.numeroComprobante || '-'}\n` +
-          `CAE: ${f.cae || '-'}\n` +
-          `Vencimiento CAE: ${f.vencimientoCae || '-'}`
+          `Punto de Venta: ${datosFactura.puntoVenta || '-'}\n` +
+          `Comprobante N°: ${datosFactura.numeroComprobante || '-'}\n` +
+          `CAE: ${datosFactura.cae || '-'}\n` +
+          `Vencimiento CAE: ${datosFactura.vencimientoCae || '-'}`
         );
       } else {
-        limpiarFormularioVenta();
         alert(`✅ Venta registrada correctamente por $${totalVenta.toLocaleString('es-AR')}.`);
       }
 
