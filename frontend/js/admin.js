@@ -45,6 +45,7 @@ const ticketTotalEl = document.getElementById('ticket-total-monto');
 const selectMetodoPago = document.getElementById('venta-metodo-pago');
 const checkEmitirArca = document.getElementById('venta-emitir-arca');
 const arcaClientePanel = document.getElementById('arca-cliente-panel');
+const selectArcaTipoFactura = document.getElementById('arca-tipo-factura');
 const selectArcaDocTipo = document.getElementById('arca-doc-tipo');
 const grupoArcaDocNro = document.getElementById('grupo-arca-doc-nro');
 const inputArcaDocNro = document.getElementById('arca-doc-nro');
@@ -254,7 +255,6 @@ function actualizarSelectProductos() {
   }
 }
 
-// Al elegir un producto, autocompleta su precio de venta para que puedas editarlo libremente
 if (selectProducto) {
   selectProducto.addEventListener('change', () => {
     const id = selectProducto.value;
@@ -267,7 +267,6 @@ if (selectProducto) {
   });
 }
 
-// Botón "Agregar Ítem al Ticket de Venta"
 if (btnAgregarTicket) {
   btnAgregarTicket.addEventListener('click', () => {
     const id = selectProducto.value;
@@ -292,7 +291,6 @@ if (btnAgregarTicket) {
       return;
     }
 
-    // Verificar stock disponible (si es producto)
     const yaEnTicket = ticketVenta
       .filter(i => i.id === id)
       .reduce((acc, i) => acc + i.cantidad, 0);
@@ -302,7 +300,6 @@ if (btnAgregarTicket) {
       return;
     }
 
-    // Si ya existe el mismo producto con el mismo precio, sumamos cantidad
     const existente = ticketVenta.find(i => i.id === id && i.precioUnitario === precioUnitario);
     if (existente) {
       existente.cantidad += cantidad;
@@ -318,7 +315,6 @@ if (btnAgregarTicket) {
       });
     }
 
-    // Limpiar selección para agregar otro producto cómodo
     selectProducto.value = '';
     inputPrecioUnitario.value = '';
     inputCantidad.value = 1;
@@ -393,16 +389,17 @@ if (selectArcaDocTipo) {
 }
 
 // ==========================================
-// 6. REGISTRAR VENTA Y EMITIR FACTURA ARCA
+// 6. REGISTRAR VENTA (/api/caja/venta) + ARCA (/api/facturacion/emitir)
 // ==========================================
 if (btnRegistrarVenta) {
   btnRegistrarVenta.addEventListener('click', async () => {
-    // Si el ticket está vacío pero hay un producto seleccionado arriba, lo tomamos automáticamente
     let itemsAFacturar = [...ticketVenta];
 
     if (itemsAFacturar.length === 0 && selectProducto.value) {
       const prod = inventario.find(p => p.id === selectProducto.value);
-      const precioUnit = Number(inputPrecioUnitario.value || prod.precioVenta || 0);
+      const precioUnit = inputPrecioUnitario.value !== ""
+        ? Number(inputPrecioUnitario.value)
+        : Number(prod.precioVenta || 0);
       const cant = Number(inputCantidad.value || 1);
 
       if (prod.tipo !== 'servicio' && cant > Number(prod.stock || 0)) {
@@ -429,120 +426,130 @@ if (btnRegistrarVenta) {
     const metodoPago = selectMetodoPago.value;
     const emitirFactura = checkEmitirArca.checked;
 
-    // Validar datos de documento para ARCA
-    let docTipo = 99;
-    let docNro = 0;
+    const tieneProductos = itemsAFacturar.some(i => i.tipo === 'producto');
+    const tieneServicios = itemsAFacturar.some(i => i.tipo === 'servicio');
+    let concepto = 1;
+    if (tieneProductos && tieneServicios) concepto = 3;
+    else if (tieneServicios) concepto = 2;
+
+    let tipoDoc = 99;
+    let cuitDniCliente = "";
+    let tipoFactura = 11;
 
     if (emitirFactura) {
-      docTipo = Number(selectArcaDocTipo.value);
-      const docRaw = (inputArcaDocNro.value || "").replace(/\D/g, '');
+      tipoFactura = Number(selectArcaTipoFactura.value) || 11;
+      tipoDoc = Number(selectArcaDocTipo.value) || 99;
+      cuitDniCliente = (inputArcaDocNro.value || "").replace(/\D/g, '');
 
-      if (docTipo === 96) {
-        if (docRaw.length < 7 || docRaw.length > 8) {
-          alert("Para facturar con DNI ingresá un número válido de 7 u 8 dígitos.");
-          inputArcaDocNro.focus();
-          return;
-        }
-        docNro = Number(docRaw);
-      } else if (docTipo === 80) {
-        if (docRaw.length !== 11) {
-          alert("Para facturar con CUIT ingresá los 11 dígitos sin guiones.");
-          inputArcaDocNro.focus();
-          return;
-        }
-        docNro = Number(docRaw);
-      } else {
-        docTipo = 99;
-        docNro = 0;
+      if (tipoDoc === 96 && (cuitDniCliente.length < 7 || cuitDniCliente.length > 8)) {
+        alert("Para facturar con DNI ingresá un número válido de 7 u 8 dígitos.");
+        inputArcaDocNro.focus();
+        return;
+      }
+
+      if (tipoDoc === 80 && cuitDniCliente.length !== 11) {
+        alert("Para facturar con CUIT ingresá los 11 dígitos sin guiones.");
+        inputArcaDocNro.focus();
+        return;
+      }
+
+      if (tipoDoc === 99) {
+        cuitDniCliente = "0";
       }
     }
 
     try {
       btnRegistrarVenta.disabled = true;
-      btnRegistrarVenta.textContent = emitirFactura ? "Conectando con ARCA..." : "Registrando venta...";
+      btnRegistrarVenta.textContent = "Registrando venta en caja...";
 
-      let datosFactura = null;
+      // PASO 1: Registrar la venta y descontar stock en /api/caja/venta
+      const resCaja = await fetch(`${BACKEND_URL}/api/caja/venta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: itemsAFacturar,
+          metodoPago,
+          total: totalVenta,
+          cliente: {
+            nombre: tipoDoc === 99 ? "Consumidor Final" : `Doc ${cuitDniCliente}`,
+            tipoDoc,
+            cuitDni: cuitDniCliente
+          }
+        })
+      });
 
-      // Si corresponde emitir factura electrónica en ARCA, llamamos al backend en Render
+      const textoCaja = await resCaja.text();
+      let dataCaja;
+      try {
+        dataCaja = JSON.parse(textoCaja);
+      } catch {
+        throw new Error(`El servidor de caja devolvió una respuesta inesperada (${resCaja.status}).`);
+      }
+
+      if (!resCaja.ok || !dataCaja.success) {
+        throw new Error(dataCaja.error || `Error al registrar venta (${resCaja.status})`);
+      }
+
+      const ventaId = dataCaja.ventaId;
+
+      // PASO 2: Si está marcado ARCA, emitir factura electrónica en /api/facturacion/emitir
       if (emitirFactura) {
-        const res = await fetch(`${BACKEND_URL}/registrar-venta`, {
+        btnRegistrarVenta.textContent = "Emitiendo factura en ARCA...";
+
+        const resArca = await fetch(`${BACKEND_URL}/api/facturacion/emitir`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            items: itemsAFacturar,
+            ventaId,
+            cuitDniCliente,
+            tipoDoc,
+            tipoFactura,
             total: totalVenta,
-            metodoPago,
-            emitirFactura: true,
-            cliente: {
-              docTipo,
-              docNro
-            }
+            concepto
           })
         });
 
-        const textoRespuesta = await res.text();
-        let data;
+        const textoArca = await resArca.text();
+        let dataArca;
         try {
-          data = JSON.parse(textoRespuesta);
+          dataArca = JSON.parse(textoArca);
         } catch {
-          throw new Error(`El servidor respondió con estado ${res.status} (ruta /registrar-venta no disponible en el backend).`);
+          throw new Error(`La venta se guardó en caja, pero ARCA devolvió una respuesta inválida (${resArca.status}).`);
         }
 
-        if (!res.ok || data.error || data.ok === false) {
-          throw new Error(data.error || data.mensaje || `Error del servidor ARCA (${res.status})`);
+        if (!resArca.ok || !dataArca.success) {
+          throw new Error(`La venta se guardó en caja y se descontó stock, pero falló ARCA:\n${dataArca.error || 'Error desconocido'}`);
         }
 
-        datosFactura = data;
-      }
-
-      // Descontar stock en Firestore para cada producto vendido
-      for (const item of itemsAFacturar) {
-        if (item.tipo !== 'servicio') {
-          const prodActual = inventario.find(p => p.id === item.id);
-          if (prodActual) {
-            const nuevoStock = Math.max(0, Number(prodActual.stock || 0) - item.cantidad);
-            await updateDoc(doc(db, "productos_servicios", item.id), { stock: nuevoStock });
-          }
-        }
-      }
-
-      // Guardar el registro de la venta en Firestore
-      await addDoc(collection(db, "ventas"), {
-        items: itemsAFacturar,
-        total: totalVenta,
-        metodoPago,
-        facturadoArca: emitirFactura,
-        clienteDocTipo: docTipo,
-        clienteDocNro: docNro,
-        factura: datosFactura,
-        fecha: serverTimestamp()
-      });
-
-      // Resetear ticket
-      ticketVenta = [];
-      renderizarTicketVenta();
-      selectProducto.value = '';
-      inputPrecioUnitario.value = '';
-      inputCantidad.value = 1;
-      inputArcaDocNro.value = '';
-
-      if (emitirFactura && datosFactura) {
+        const f = dataArca.datosFactura || {};
+        limpiarFormularioVenta();
         alert(
-          `✅ Venta registrada y Factura ARCA emitida!\n\n` +
-          `Comprobante N°: ${datosFactura.nroComprobante || datosFactura.cbteNro || '-'}\n` +
-          `CAE: ${datosFactura.cae || '-'}\n` +
-          `Vencimiento CAE: ${datosFactura.caeVencimiento || datosFactura.vtoCae || '-'}`
+          `✅ ¡Venta registrada y Factura ARCA emitida!\n\n` +
+          `Punto de Venta: ${f.puntoVenta || '-'}\n` +
+          `Comprobante N°: ${f.numeroComprobante || '-'}\n` +
+          `CAE: ${f.cae || '-'}\n` +
+          `Vencimiento CAE: ${f.vencimientoCae || '-'}`
         );
       } else {
+        limpiarFormularioVenta();
         alert(`✅ Venta registrada correctamente por $${totalVenta.toLocaleString('es-AR')}.`);
       }
 
     } catch (err) {
       console.error("Error al procesar la venta:", err);
-      alert("❌ Error al registrar la venta:\n" + err.message);
+      alert("❌ " + err.message);
     } finally {
       btnRegistrarVenta.disabled = false;
       btnRegistrarVenta.textContent = "Registrar Venta";
     }
   });
+}
+
+function limpiarFormularioVenta() {
+  ticketVenta = [];
+  renderizarTicketVenta();
+  selectProducto.value = '';
+  inputPrecioUnitario.value = '';
+  inputCantidad.value = 1;
+  inputArcaDocNro.value = '';
 }
