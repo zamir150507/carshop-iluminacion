@@ -14,11 +14,22 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// URL del Backend en Render (solo para emitir factura ARCA)
+// URL del Backend en Render (para emitir factura ARCA)
 const BACKEND_URL = "https://carshop-backend-2t7v.onrender.com";
+
+// Datos fiscales del comercio para el encabezado y QR de la factura
+const DATOS_EMISOR = {
+  nombreFantasia: "CarShop Iluminación",
+  razonSocial: "Salomon Kevin Nicolas",
+  cuit: 20394386813,
+  cuitFormateado: "20-39438681-3",
+  domicilio: "Cabo Benitez 2836 - Comodoro Rivadavia, Chubut",
+  condicionIva: "Responsable Monotributo"
+};
 
 // Estado global
 let inventario = [];
+let historialVentas = [];
 let ticketVenta = [];
 
 // Referencias DOM - Auth
@@ -34,6 +45,7 @@ const editItemIdInput = document.getElementById('edit-item-id');
 const btnGuardarItem = document.getElementById('btn-guardar-item');
 const btnCancelarEdicion = document.getElementById('btn-cancelar-edicion');
 const inventarioTbody = document.getElementById('inventario-tbody');
+const ventasTbody = document.getElementById('ventas-tbody');
 
 // Referencias DOM - Venta / Cobro / ARCA
 const selectProducto = document.getElementById('venta-producto');
@@ -51,6 +63,12 @@ const grupoArcaDocNro = document.getElementById('grupo-arca-doc-nro');
 const inputArcaDocNro = document.getElementById('arca-doc-nro');
 const btnRegistrarVenta = document.getElementById('btn-registrar-venta');
 
+// Referencias DOM - Modal Factura PDF
+const modalFacturaPrint = document.getElementById('modal-factura-print');
+const facturaHojaContenido = document.getElementById('factura-hoja-contenido');
+const btnImprimirFactura = document.getElementById('btn-imprimir-factura');
+const btnCerrarModalFactura = document.getElementById('btn-cerrar-modal-factura');
+
 // ==========================================
 // 1. AUTENTICACIÓN
 // ==========================================
@@ -59,6 +77,7 @@ onAuthStateChanged(auth, (user) => {
     if (loginSection) loginSection.classList.add('hidden');
     if (panelWrapper) panelWrapper.classList.remove('hidden');
     iniciarEscuchaInventario();
+    iniciarEscuchaVentas();
   } else {
     if (loginSection) loginSection.classList.remove('hidden');
     if (panelWrapper) panelWrapper.classList.add('hidden');
@@ -85,9 +104,10 @@ if (btnCerrarSesion) {
 }
 
 // ==========================================
-// 2. INVENTARIO EN TIEMPO REAL
+// 2. INVENTARIO Y VENTAS EN TIEMPO REAL
 // ==========================================
 let unsubscribeInventario = null;
+let unsubscribeVentas = null;
 
 function iniciarEscuchaInventario() {
   if (unsubscribeInventario) return;
@@ -98,6 +118,19 @@ function iniciarEscuchaInventario() {
     actualizarSelectProductos();
   }, (error) => {
     console.error("Error leyendo inventario:", error);
+  });
+}
+
+function iniciarEscuchaVentas() {
+  if (unsubscribeVentas) return;
+
+  unsubscribeVentas = onSnapshot(collection(db, "ventas"), (snapshot) => {
+    historialVentas = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Ordenar de más reciente a más antigua
+    historialVentas.sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
+    renderizarTablaVentas();
+  }, (error) => {
+    console.error("Error leyendo ventas:", error);
   });
 }
 
@@ -145,6 +178,47 @@ function renderizarTablaInventario() {
     tr.querySelector('.btn-del').addEventListener('click', () => eliminarItem(item));
 
     inventarioTbody.appendChild(tr);
+  });
+}
+
+function renderizarTablaVentas() {
+  if (!ventasTbody) return;
+
+  if (historialVentas.length === 0) {
+    ventasTbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#888;">Todavía no hay ventas registradas.</td></tr>`;
+    return;
+  }
+
+  ventasTbody.innerHTML = '';
+
+  historialVentas.forEach(venta => {
+    const fechaObj = venta.fecha ? new Date(venta.fecha) : new Date();
+    const fechaStr = fechaObj.toLocaleDateString('es-AR') + ' ' + fechaObj.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const resumenItems = (venta.items || []).map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
+    const clienteTxt = venta.cliente?.cuitDni && venta.cliente.cuitDni !== '0'
+      ? `Doc: ${venta.cliente.cuitDni}`
+      : 'Consumidor Final';
+
+    const f = venta.datosFactura;
+    const badgeArca = venta.facturadoARCA && f
+      ? `<span class="badge-arca">PV ${String(f.puntoVenta).padStart(4, '0')}-${String(f.numeroComprobante).padStart(8, '0')} | CAE: ${f.cae}</span>`
+      : `<span style="color:#888; font-size:0.82rem;">Sin factura fiscal</span>`;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="white-space:nowrap;">${fechaStr}</td>
+      <td>${resumenItems || '-'}</td>
+      <td>${clienteTxt}</td>
+      <td>${venta.metodoPago || '-'}</td>
+      <td><strong>$${Number(venta.total || 0).toLocaleString('es-AR')}</strong></td>
+      <td>${badgeArca}</td>
+      <td>
+        <button class="btn-pdf">📄 Ver / PDF</button>
+      </td>
+    `;
+
+    tr.querySelector('.btn-pdf').addEventListener('click', () => abrirModalFactura(venta));
+    ventasTbody.appendChild(tr);
   });
 }
 
@@ -462,7 +536,7 @@ if (btnRegistrarVenta) {
       btnRegistrarVenta.disabled = true;
       let datosFactura = null;
 
-      // PASO 1: Si está marcado ARCA, emitir primero el comprobante electrónico
+      // PASO 1: Si está marcado ARCA, emitir comprobante electrónico
       if (emitirFactura) {
         btnRegistrarVenta.textContent = "Emitiendo factura en ARCA...";
 
@@ -496,7 +570,7 @@ if (btnRegistrarVenta) {
 
       btnRegistrarVenta.textContent = "Actualizando stock y caja...";
 
-      // PASO 2: Agrupar cantidades vendidas por producto y descontar stock en Firestore
+      // PASO 2: Descontar stock en Firestore
       const cantidadesDescontar = {};
       for (const item of itemsAFacturar) {
         if (item.tipo !== 'servicio' && item.id) {
@@ -512,10 +586,9 @@ if (btnRegistrarVenta) {
         }
       }
 
-      // PASO 3: Guardar el registro de la venta en la colección 'ventas' de Firestore
-      await addDoc(collection(db, "ventas"), {
+      // PASO 3: Guardar venta en Firestore
+      const ventaObj = {
         fecha: new Date().toISOString(),
-        creadoEn: serverTimestamp(),
         items: itemsAFacturar,
         total: totalVenta,
         metodoPago,
@@ -526,21 +599,15 @@ if (btnRegistrarVenta) {
         },
         facturadoARCA: emitirFactura,
         datosFactura
+      };
+
+      await addDoc(collection(db, "ventas"), {
+        ...ventaObj,
+        creadoEn: serverTimestamp()
       });
 
       limpiarFormularioVenta();
-
-      if (emitirFactura && datosFactura) {
-        alert(
-          `✅ ¡Venta registrada y Factura ARCA emitida!\n\n` +
-          `Punto de Venta: ${datosFactura.puntoVenta || '-'}\n` +
-          `Comprobante N°: ${datosFactura.numeroComprobante || '-'}\n` +
-          `CAE: ${datosFactura.cae || '-'}\n` +
-          `Vencimiento CAE: ${datosFactura.vencimientoCae || '-'}`
-        );
-      } else {
-        alert(`✅ Venta registrada correctamente por $${totalVenta.toLocaleString('es-AR')}.`);
-      }
+      abrirModalFactura(ventaObj);
 
     } catch (err) {
       console.error("Error al procesar la venta:", err);
@@ -559,4 +626,166 @@ function limpiarFormularioVenta() {
   inputPrecioUnitario.value = '';
   inputCantidad.value = 1;
   inputArcaDocNro.value = '';
+}
+
+// ==========================================
+// 7. GENERAR VISTA DE FACTURA / PDF + QR ARCA
+// ==========================================
+function abrirModalFactura(venta) {
+  if (!modalFacturaPrint || !facturaHojaContenido) return;
+
+  const esFiscal = Boolean(venta.facturadoARCA && venta.datosFactura);
+  const f = venta.datosFactura || {};
+
+  // Letra y código de comprobante
+  let letra = "X";
+  let codTexto = "COMPROBANTE DE VENTA";
+  let tipoCmpNum = 11;
+
+  if (esFiscal) {
+    tipoCmpNum = Number(f.tipoFactura || 11);
+    if (tipoCmpNum === 1) {
+      letra = "A";
+      codTexto = "COD. 001 - FACTURA A";
+    } else if (tipoCmpNum === 6) {
+      letra = "B";
+      codTexto = "COD. 006 - FACTURA B";
+    } else {
+      letra = "C";
+      codTexto = "COD. 011 - FACTURA C";
+    }
+  }
+
+  const fechaObj = venta.fecha ? new Date(venta.fecha) : new Date();
+  const fechaFormateada = fechaObj.toLocaleDateString('es-AR');
+  const fechaIsoQr = fechaObj.toISOString().split('T')[0];
+
+  const ptoVtaStr = esFiscal ? String(f.puntoVenta || 5).padStart(5, '0') : "00000";
+  const nroCompStr = esFiscal ? String(f.numeroComprobante || 1).padStart(8, '0') : String(Date.now()).slice(-8);
+
+  // Datos del receptor
+  const docTipo = Number(venta.cliente?.tipoDoc || f.docTipo || 99);
+  const docNro = String(venta.cliente?.cuitDni || f.docNro || "0");
+  let docLabel = "Consumidor Final";
+  if (docTipo === 80 && docNro !== "0") docLabel = `CUIT: ${docNro}`;
+  else if (docTipo === 96 && docNro !== "0") docLabel = `DNI: ${docNro}`;
+
+  // Generar Código QR oficial de ARCA (RG 4892)
+  let bloqueArcaHtml = `<div style="margin-top:16px; color:#555; font-size:12px;">Documento no válido como factura fiscal.</div>`;
+
+  if (esFiscal) {
+    const payloadQr = {
+      ver: 1,
+      fecha: fechaIsoQr,
+      cuit: DATOS_EMISOR.cuit,
+      ptoVta: Number(f.puntoVenta || 5),
+      tipoCmp: tipoCmpNum,
+      nroCmp: Number(f.numeroComprobante || 1),
+      importe: Number(venta.total || 0),
+      moneda: "PES",
+      ctz: 1,
+      tipoDocRec: docTipo,
+      nroDocRec: Number(docNro) || 0,
+      tipoCodAut: "E",
+      codAut: Number(f.cae) || String(f.cae)
+    };
+
+    const base64Qr = btoa(JSON.stringify(payloadQr));
+    const urlArcaQr = `https://www.arca.gob.ar/fe/qr/?p=${base64Qr}`;
+    const imgQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(urlArcaQr)}`;
+
+    // Formatear vencimiento CAE (YYYYMMDD -> DD/MM/YYYY)
+    let vtoCaeFmt = String(f.vencimientoCae || '');
+    if (vtoCaeFmt.length === 8) {
+      vtoCaeFmt = `${vtoCaeFmt.slice(6, 8)}/${vtoCaeFmt.slice(4, 6)}/${vtoCaeFmt.slice(0, 4)}`;
+    }
+
+    bloqueArcaHtml = `
+      <div class="fac-footer-arca">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <img src="${imgQrUrl}" alt="QR ARCA" class="fac-qr-img">
+          <div style="font-size:11px; color:#333;">
+            <strong>ARCA - Agencia de Recaudación y Control Aduanero</strong><br>
+            Comprobante Autorizado Electrónicamente
+          </div>
+        </div>
+        <div style="text-align:right; font-size:13px;">
+          <div><strong>CAE N°:</strong> ${f.cae}</div>
+          <div><strong>Fecha de Vto. de CAE:</strong> ${vtoCaeFmt}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const filasItemsHtml = (venta.items || []).map(item => `
+    <tr>
+      <td>${item.cantidad}</td>
+      <td>${item.nombre}</td>
+      <td style="text-align:right;">$${Number(item.precioUnitario || 0).toLocaleString('es-AR')}</td>
+      <td style="text-align:right;"><strong>$${Number(item.subtotal || 0).toLocaleString('es-AR')}</strong></td>
+    </tr>
+  `).join('');
+
+  facturaHojaContenido.innerHTML = `
+    <div style="text-align:center; font-weight:bold; border:1px solid #222; border-bottom:none; padding:4px; background:#f5f5f5;">
+      ORIGINAL
+    </div>
+    <div class="fac-header">
+      <div class="fac-col-izq">
+        <div style="font-size:18px; font-weight:bold; margin-bottom:6px;">${DATOS_EMISOR.nombreFantasia}</div>
+        <div><strong>Titular:</strong> ${DATOS_EMISOR.razonSocial}</div>
+        <div><strong>Domicilio:</strong> ${DATOS_EMISOR.domicilio}</div>
+        <div><strong>Condición frente al IVA:</strong> ${DATOS_EMISOR.condicionIva}</div>
+      </div>
+      <div class="fac-letra-box">
+        <div class="fac-letra">${letra}</div>
+        <div class="fac-cod">${codTexto.split(' - ')[0]}</div>
+      </div>
+      <div class="fac-col-der" style="padding-left:28px;">
+        <div style="font-size:16px; font-weight:bold; margin-bottom:6px;">${esFiscal ? 'FACTURA' : 'RECIBO'}</div>
+        <div><strong>Punto de Venta:</strong> ${ptoVtaStr} &nbsp; <strong>Comp. Nro:</strong> ${nroCompStr}</div>
+        <div><strong>Fecha de Emisión:</strong> ${fechaFormateada}</div>
+        <div><strong>CUIT:</strong> ${DATOS_EMISOR.cuitFormateado}</div>
+      </div>
+    </div>
+
+    <div class="fac-cliente-box">
+      <div><strong>Cliente:</strong> ${docLabel}</div>
+      <div><strong>Condición de Venta:</strong> ${venta.metodoPago || 'Contado'}</div>
+    </div>
+
+    <table class="fac-tabla">
+      <thead>
+        <tr>
+          <th style="width:65px;">Cant.</th>
+          <th>Producto / Servicio</th>
+          <th style="width:120px; text-align:right;">Precio Unit.</th>
+          <th style="width:120px; text-align:right;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filasItemsHtml}
+      </tbody>
+    </table>
+
+    <div class="fac-totales">
+      Importe Total: $${Number(venta.total || 0).toLocaleString('es-AR')}
+    </div>
+
+    ${bloqueArcaHtml}
+  `;
+
+  modalFacturaPrint.classList.remove('hidden');
+}
+
+if (btnImprimirFactura) {
+  btnImprimirFactura.addEventListener('click', () => {
+    window.print();
+  });
+}
+
+if (btnCerrarModalFactura) {
+  btnCerrarModalFactura.addEventListener('click', () => {
+    modalFacturaPrint.classList.add('hidden');
+  });
 }

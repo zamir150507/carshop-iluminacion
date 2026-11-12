@@ -49,6 +49,10 @@
       border: 1px solid #2d2d2d;
       border-radius: 10px;
       padding: 20px;
+      margin-bottom: 25px;
+    }
+    .admin-grid .admin-card {
+      margin-bottom: 0;
     }
     .admin-card h2 {
       color: #ff5722;
@@ -257,6 +261,14 @@
       font-size: 0.8rem;
       font-weight: 600;
     }
+    .badge-arca {
+      background: rgba(33, 150, 243, 0.2);
+      color: #64b5f6;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
     .btn-edit {
       background-color: #ff9800;
       color: #000;
@@ -276,6 +288,19 @@
       font-weight: bold;
       cursor: pointer;
     }
+    .btn-pdf {
+      background-color: #1976d2;
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-pdf:hover {
+      background-color: #1565c0;
+    }
     .login-box {
       max-width: 400px;
       margin: 70px auto;
@@ -283,6 +308,157 @@
       border: 1px solid #333;
       border-radius: 10px;
       padding: 25px;
+    }
+
+    /* MODAL DE FACTURA / COMPROBANTE PARA PDF */
+    .factura-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.82);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 12px;
+      overflow-y: auto;
+      z-index: 9999;
+    }
+    .factura-modal-box {
+      background: #222;
+      border-radius: 10px;
+      max-width: 780px;
+      width: 100%;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+    .factura-modal-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .factura-hoja {
+      background: #ffffff;
+      color: #111111;
+      padding: 28px 32px;
+      border-radius: 4px;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .fac-header {
+      display: flex;
+      justify-content: space-between;
+      border: 1px solid #222;
+      position: relative;
+    }
+    .fac-col-izq, .fac-col-der {
+      width: 46%;
+      padding: 14px;
+    }
+    .fac-col-izq {
+      border-right: 1px solid #222;
+    }
+    .fac-letra-box {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      transform: translateX(-50%);
+      background: #fff;
+      border: 1px solid #222;
+      border-top: none;
+      width: 54px;
+      text-align: center;
+      padding: 4px 0;
+    }
+    .fac-letra {
+      font-size: 26px;
+      font-weight: bold;
+      line-height: 1;
+    }
+    .fac-cod {
+      font-size: 10px;
+      font-weight: bold;
+    }
+    .fac-cliente-box {
+      border: 1px solid #222;
+      border-top: none;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .fac-tabla {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+    .fac-tabla th {
+      background: #eeeeee;
+      border: 1px solid #222;
+      padding: 7px 8px;
+      text-align: left;
+      font-size: 12px;
+    }
+    .fac-tabla td {
+      border: 1px solid #ccc;
+      padding: 7px 8px;
+      font-size: 12.5px;
+    }
+    .fac-totales {
+      margin-top: 14px;
+      border: 1px solid #222;
+      padding: 12px 14px;
+      text-align: right;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .fac-footer-arca {
+      margin-top: 16px;
+      border-top: 1px solid #222;
+      padding-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    .fac-qr-img {
+      width: 115px;
+      height: 115px;
+      border: 1px solid #ddd;
+    }
+
+    /* ESTILOS DE IMPRESIÓN / GUARDAR COMO PDF */
+    @media print {
+      body * {
+        visibility: hidden !important;
+      }
+      #modal-factura-print,
+      #modal-factura-print * {
+        visibility: visible !important;
+      }
+      #modal-factura-print {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: #fff !important;
+        padding: 0 !important;
+      }
+      .factura-modal-box {
+        background: #fff !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .factura-hoja {
+        padding: 10px !important;
+      }
     }
   </style>
 </head>
@@ -489,7 +665,47 @@
           </table>
         </div>
       </section>
+
+      <!-- HISTORIAL DE VENTAS Y FACTURAS -->
+      <section class="admin-card">
+        <h2>Historial de Ventas y Facturas ARCA</h2>
+        <div class="table-responsive">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Detalle</th>
+                <th>Cliente</th>
+                <th>Pago</th>
+                <th>Total</th>
+                <th>Comprobante ARCA</th>
+                <th>PDF / Imprimir</th>
+              </tr>
+            </thead>
+            <tbody id="ventas-tbody">
+              <tr>
+                <td colspan="7" style="text-align:center; color:#888;">Cargando historial de ventas...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <!-- MODAL PARA VER, IMPRIMIR O GUARDAR PDF DE LA FACTURA -->
+  <div id="modal-factura-print" class="factura-modal-overlay hidden">
+    <div class="factura-modal-box">
+      <div class="factura-modal-actions no-print">
+        <button type="button" id="btn-imprimir-factura" class="btn-green" style="width:auto; padding:10px 18px;">
+          🖨️ Imprimir / Guardar PDF
+        </button>
+        <button type="button" id="btn-cerrar-modal-factura" class="btn-logout">
+          Cerrar ✖
+        </button>
+      </div>
+      <div id="factura-hoja-contenido" class="factura-hoja"></div>
+    </div>
   </div>
 
   <script type="module" src="js/admin.js"></script>
